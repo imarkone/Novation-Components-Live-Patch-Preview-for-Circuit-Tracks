@@ -1,0 +1,18 @@
+{
+  "manifest_version": 3,
+  "name": "Patch Preview for Circuit Tracks",
+  "version": "0.6.0",
+  "description": "Audition patches from Novation Components on your Circuit Tracks over USB MIDI.",
+  "content_scripts": [
+    {
+      "matches": [
+        "https://components.novationmusic.com/*"
+      ],
+      "js": [
+        "preview.js"
+      ],
+      "run_at": "document_idle",
+      "world": "MAIN"
+    }
+  ]
+}
