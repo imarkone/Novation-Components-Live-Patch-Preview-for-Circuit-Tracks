@@ -2,7 +2,7 @@
 // The MAIN world has no chrome.runtime, so the files travel through window.postMessage.
 (() => {
   "use strict";
-  const FILES = { lang: "data/lang.csv", recipes: "data/recipes.csv", phrases: "data/phrases.csv", corpus: "data/corpus.csv" };
+  const FILES = { lang: "data/lang.csv", recipes: "data/recipes.csv", phrases: "data/phrases.csv", corpus: "data/corpus.csv", levels: "data/levels.csv" };
   let cache = null;
 
   async function readFiles() {

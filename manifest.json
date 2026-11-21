@@ -1,31 +1,51 @@
 {
   "manifest_version": 3,
   "name": "Circuit Tracks Patch Preview and Random Sound Generator",
-  "version": "0.7.3",
+  "version": "0.7.4",
   "description": "Circuit Tracks: audition patches, generate random sounds, open/save .syx and record WAV in Novation Components.",
   "content_scripts": [
     {
-      "matches": ["https://components.novationmusic.com/*"],
-      "js": ["preview.js"],
+      "matches": [
+        "https://components.novationmusic.com/*"
+      ],
+      "js": [
+        "preview.js"
+      ],
       "run_at": "document_idle",
       "world": "MAIN"
     },
     {
-      "matches": ["https://components.novationmusic.com/*"],
-      "js": ["random.js"],
+      "matches": [
+        "https://components.novationmusic.com/*"
+      ],
+      "js": [
+        "random.js"
+      ],
       "run_at": "document_idle",
       "world": "MAIN"
     },
     {
-      "matches": ["https://components.novationmusic.com/*"],
-      "js": ["loader.js"],
+      "matches": [
+        "https://components.novationmusic.com/*"
+      ],
+      "js": [
+        "loader.js"
+      ],
       "run_at": "document_idle"
     }
   ],
   "web_accessible_resources": [
     {
-      "resources": ["data/lang.csv", "data/recipes.csv", "data/phrases.csv", "data/corpus.csv"],
-      "matches": ["https://components.novationmusic.com/*"]
+      "resources": [
+        "data/lang.csv",
+        "data/recipes.csv",
+        "data/phrases.csv",
+        "data/corpus.csv",
+        "data/levels.csv"
+      ],
+      "matches": [
+        "https://components.novationmusic.com/*"
+      ]
     }
   ]
 }

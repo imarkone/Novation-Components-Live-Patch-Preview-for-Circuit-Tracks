@@ -44,10 +44,13 @@
     for (const r of parseCsv(files.lang)) lang[r.key] = r;
     const types = {};
     for (const r of parseCsv(files.recipes)) types[r.type] = { jitter: +r.jitter, wild: +r.wild, phrase: r.phrase };
+    // data/levels.csv: thresholds for the audio level check (dBFS at the user's interface gain).
+    const levels = { quiet_db: -45, loud_db: -3, retries: 3, tail_db: -60 };
+    for (const r of parseCsv(files.levels || "key,value\n")) if (r.key in levels) levels[r.key] = +r.value;
     const corpus = parseCsv(files.corpus).map(r => Object.fromEntries(Object.entries(r).map(([k, v]) => [k, v !== "" && k !== "mx" && !isNaN(+v) ? +v : v])));
     const phrases = {};
     for (const r of parseCsv(files.phrases)) (phrases[r.phrase] ??= []).push({ t: +r.time_ms, note: +r.note, dur: +r.dur_ms, vel: +r.vel });
-    return { lang, types, phrases, corpus };
+    return { lang, types, phrases, corpus, levels };
   }
 
   // Language file connection point: data/lang.csv (columns key, sk, en).
@@ -324,7 +327,7 @@
   const PITCH_KEY = /^(voice\.(octave|preglide)|osc\d\.semi)/;
   // Matrix destination indices that change loudness (Osc 1 Level, Osc 2 Level, Noise Level, Ring Mod Level).
   const LEVEL_DEST = new Set([7, 8, 9, 10]);
-  const NO_WILD = /^(voice\.|mix\.|osc\d\.(semi|cents)|env1\.)/;
+  const NO_WILD = /^(voice\.|mix\.|osc\d\.(semi|cents)|env1\.|eq\.(lg|mg|hg))/;
 
   function planRandom(cur, meta, type, k, locks) {
     const cfg = typeCfg(type), pool = donors(type), next = {};
@@ -426,10 +429,26 @@
     if (type.startsWith("Lowpass") && (m["flt.freq"] ?? 127) < 25) put("flt.freq", 25);
     if (type.startsWith("Highpass") && (m["flt.freq"] ?? 0) > 100) put("flt.freq", 100);
     for (const key of ["osc1.semi", "osc2.semi"]) if (Math.abs(m[key] ?? 0) > 24) put(key, clamp(m[key], -24, 24));
-    // A closed lowpass with no filter envelope and no matrix path to Frequency lets nothing through.
-    const filterMod = Object.keys(m).some(key => /^mx\.\d+\.dest$/.test(key) && m[key] === "Frequency" && (m[key.replace("dest", "depth")] ?? 0) > 5);
-    if (type.startsWith("Lowpass") && (m["flt.freq"] ?? 127) < 45 && (m["flt.env2"] ?? 0) <= 10 && !filterMod) put("flt.freq", 45);
-    if (type.startsWith("Bandpass") && (m["flt.freq"] ?? 127) < 40 && Math.abs(m["flt.env2"] ?? 0) <= 10 && !filterMod) put("flt.freq", 55);
+    // Measured (WAV batch 2026-11): lowpass/bandpass sounds were inaudible when frequency + 0.8 x filter envelope < 60.
+    // Matrix routings to Frequency count at half their depth.
+    const matrixOpen = Object.keys(m).filter(key => /^mx\.\d+\.dest$/.test(key) && m[key] === "Frequency")
+      .reduce((sum, key) => sum + 0.5 * Math.abs(m[key.replace("dest", "depth")] ?? 0), 0);
+    const boost = 0.8 * Math.max(0, m["flt.env2"] ?? 0) + matrixOpen;
+    if ((type.startsWith("Lowpass") || type.startsWith("Bandpass")) && (m["flt.freq"] ?? 127) + boost < 60)
+      put("flt.freq", Math.round(clamp(60 - boost, 0, 127)));
+    // EQ boosts of +41 dB clipped, cuts of -64 dB silenced the sound.
+    for (const key of ["eq.lg", "eq.mg", "eq.hg"]) if (Math.abs(m[key] ?? 0) > 18) put(key, clamp(m[key], -18, 18));
+    // Lowest audible pitch: keyboard octave x 12 + semitones of the louder-used oscillators must stay >= -36.
+    const audible = [["osc1.semi", "mix.osc1"], ["osc2.semi", "mix.osc2"]].filter(([, lvl]) => (m[lvl] ?? 0) >= 30).map(([semi]) => m[semi] ?? 0);
+    const lowest = 12 * (m["voice.octave"] ?? 0) + (audible.length ? Math.min(...audible) : 0);
+    if (lowest < -36) {
+      const raise = Math.ceil((-36 - lowest) / 12);
+      if (!locks.voice && cur["voice.octave"] !== undefined) put("voice.octave", (m["voice.octave"] ?? 0) + raise);
+      else for (const key of ["osc1.semi", "osc2.semi"]) put(key, clamp((m[key] ?? 0) + 12 * raise, -24, 24));
+    }
+    // A very long release with no sustain kept ringing into the next recording.
+    if ((m["env1.s"] ?? 127) < 10 && (m["env1.r"] ?? 0) > 100) put("env1.r", 90);
+    if ((m["env1.r"] ?? 0) > 115) put("env1.r", 115);
     if ((m["flt.res"] ?? 0) > 100 && (m["flt.drive"] ?? 0) > 50) put("flt.res", 85);
     if ((m["dist.level"] ?? 0) > 90) put("dist.level", 90);
     if (/Reducer/.test(String(m["dist.type"] || "")) && (m["dist.level"] ?? 0) > 60) put("dist.level", 60);
@@ -437,13 +456,15 @@
     return next;
   }
 
-  async function run(kind) {
+  // attempt > 0: automatic retry after the level check found silence; it replaces the previous try in history and undo.
+  async function run(kind, attempt = 0) {
     if (S.busy) { status(T("status_busy")); return; }
     S.busy = true; setBusy(true);
+    let retry = false;
     try {
       status(T("status_reading"));
       const { cur, meta } = await readAll();
-      S.undo.push(cur); if (S.undo.length > HISTORY_MAX) S.undo.shift();
+      if (attempt > 0) { S.history.shift(); } else { S.undo.push(cur); if (S.undo.length > HISTORY_MAX) S.undo.shift(); }
       const k = S.ui.intensity / 100, type = S.ui.type, locks = S.ui.locks;
       const seed = (Math.random() * 4294967296) >>> 0;
       rng = mulberry32(seed);
@@ -460,9 +481,36 @@
       S.history.unshift({ id: Date.now(), kind, type, values: merged, star: false, seed, intensity: S.ui.intensity, donors: donorList });
       trimHistory(); save(); renderHistory();
       status(T("status_done", { n: changed }));
-      if (S.ui.autoplay && !S.looping) await playPhrase(S.octave).catch(e => status(errorText(e)));
+      if (S.ui.autoplay && !S.looping) {
+        if (S.ui.levelCheck) retry = await levelCheck(kind, attempt);
+        else await playPhrase(S.octave).catch(e => status(errorText(e)));
+      }
     } catch (e) { status(T("status_error", { msg: e.message })); }
     finally { rng = Math.random; S.busy = false; setBusy(false); }
+    if (retry) await run(kind, attempt + 1);
+  }
+
+  // Plays the phrase while recording the audio interface input and measures it.
+  // Too quiet -> returns true (caller generates again, up to levels.csv "retries"). Too loud -> mixer levels are lowered.
+  async function levelCheck(kind, attempt) {
+    const L = S.data.levels;
+    let rec;
+    try { rec = await recordPhrase(S.octave); } catch (e) { status(audioError(e)); return false; }
+    const a = analyse(rec);
+    if (a.max_db < L.quiet_db) {
+      if (kind === "random" && attempt < L.retries) { status(T("status_retry", { max: a.max_db, i: attempt + 1, n: L.retries })); return true; }
+      status(T("status_quiet", { max: a.max_db })); return false;
+    }
+    if (a.peak_db > L.loud_db && !S.ui.locks.mixer) {
+      const factor = Math.pow(10, (L.loud_db - 3 - a.peak_db) / 20), values = {};
+      for (const key of ["mix.osc1", "mix.osc2", "mix.ring", "mix.noise"]) if (S.last.values[key] !== undefined) values[key] = Math.round(S.last.values[key] * factor);
+      await applyState(values);
+      Object.assign(S.last.values, values); S.history[0].values = { ...S.last.values }; save();
+      status(T("status_too_loud", { peak: a.peak_db }));
+      return false;
+    }
+    status(T("status_level_ok", { max: a.max_db, peak: a.peak_db }));
+    return false;
   }
 
   async function undoLast() {
@@ -604,7 +652,7 @@
       download(base + ".syx", "application/octet-stream", bytes);
       if (S.ui.debug) {
         const editor = await readAll();
-        const report = { tool: "ct-random 0.7.3", name: label, kind: info.kind, type: info.type, intensity: info.intensity, locks: info.locks, seed: info.seed,
+        const report = { tool: "ct-random 0.7.4", name: label, kind: info.kind, type: info.type, intensity: info.intensity, locks: info.locks, seed: info.seed,
           synth: S.ui.channel, donors: info.donors, generated: info.values, editorAtExport: editor.cur, patchBytes: Array.from(bytes) };
         download(base + ".json", "application/json", JSON.stringify(report, null, 1));
       }
@@ -706,6 +754,9 @@
     source.connect(proc); proc.connect(mute); mute.connect(ctx.destination);
     const audio = { ctx, stream, proc, chunks: null, channels: stream.getAudioTracks()[0].getSettings().channelCount || 1 };
     proc.onaudioprocess = e => {
+      const d = e.inputBuffer.getChannelData(0);
+      let sum = 0; for (let i = 0; i < d.length; i++) sum += d[i] * d[i];
+      audio.level = Math.sqrt(sum / d.length);
       if (!audio.chunks) return;
       audio.chunks.push([new Float32Array(e.inputBuffer.getChannelData(0)), new Float32Array(e.inputBuffer.getChannelData(e.inputBuffer.numberOfChannels > 1 ? 1 : 0))]);
     };
@@ -760,6 +811,13 @@
       sum += (l * l + r * r) / 2; lr += l * r; ll += l * l; rr += r * r;
     }
     const rms = Math.sqrt(sum / Math.max(1, left.length));
+    const win = Math.max(1, Math.round(sampleRate * 0.05));
+    let maxWin = 0;
+    for (let start = 0; start + win <= left.length; start += win >> 1) {
+      let e = 0;
+      for (let i = start; i < start + win; i++) e += (left[i] * left[i] + right[i] * right[i]) / 2;
+      maxWin = Math.max(maxWin, Math.sqrt(e / win));
+    }
     const size = 2048, re = new Float64Array(size), im = new Float64Array(size);
     let num = 0, den = 0;
     for (let start = 0; start + size <= left.length; start += size * 4) {
@@ -768,7 +826,7 @@
       for (let k = 1; k < size / 2; k++) { const mag = Math.hypot(re[k], im[k]); num += mag * k * sampleRate / size; den += mag; }
     }
     return {
-      peak_db: db(peak), rms_db: db(rms), clipped: clips, silent: rms < 0.003 ? 1 : 0,
+      peak_db: db(peak), rms_db: db(rms), max_db: db(maxWin), clipped: clips, silent: db(maxWin) < S.data.levels.quiet_db ? 1 : 0,
       lr_corr: ll && rr ? Math.round(1000 * lr / Math.sqrt(ll * rr)) / 1000 : 1, centroid_hz: den ? Math.round(num / den) : 0
     };
   }
@@ -818,7 +876,7 @@
     return new Blob([...parts, ...central, new Uint8Array(end.buffer)], { type: "application/zip" });
   }
 
-  const ANALYSIS_COLUMNS = ["file", "patch_name", "octave", "peak_db", "rms_db", "clipped", "silent", "lr_corr", "centroid_hz", "sample_rate", "device_channels"];
+  const ANALYSIS_COLUMNS = ["file", "patch_name", "octave", "max_db", "peak_db", "rms_db", "clipped", "silent", "lr_corr", "centroid_hz", "sample_rate", "device_channels"];
   const csvRow = values => values.map(x => /[",\n]/.test(String(x)) ? `"${String(x).replace(/"/g, '""')}"` : x).join(",");
   const patchName = bytes => String.fromCharCode(...bytes.subarray(9, 25)).replace(/[^\x20-\x7E]/g, "").trim();
 
@@ -855,7 +913,7 @@
       await openInput();
       for (let i = 0; i < files.length && !S.recordAbort; i++) {
         const file = files[i], bytes = new Uint8Array(await file.arrayBuffer()), base = file.name.replace(/\.syx$/i, "");
-        if (!isPatchFile(bytes)) { rows.push(csvRow([file.name, "", "", "", "", "", "", "", "", "", ""])); continue; }
+        if (!isPatchFile(bytes)) { rows.push(csvRow([file.name, "", "", "", "", "", "", "", "", "", "", ""])); continue; }
         status(T("status_batch", { i: i + 1, n: files.length, name: base }));
         const send = Uint8Array.from(bytes); send[6] = 0x00; send[7] = synth; send[8] = 0x00;
         output.send(send);
@@ -864,8 +922,8 @@
         const rec = await recordPhrase(octave);
         const a = analyse(rec);
         out.push({ name: base + ".wav", data: encodeWav(rec) });
-        rows.push(csvRow([file.name, patchName(bytes), octave, a.peak_db, a.rms_db, a.clipped, a.silent, a.lr_corr, a.centroid_hz, rec.sampleRate, rec.deviceChannels]));
-        await sleep(300);
+        rows.push(csvRow([file.name, patchName(bytes), octave, a.max_db, a.peak_db, a.rms_db, a.clipped, a.silent, a.lr_corr, a.centroid_hz, rec.sampleRate, rec.deviceChannels]));
+        await waitForSilence(output);
       }
       out.push({ name: "analysis.csv", data: new TextEncoder().encode(rows.join("\n") + "\n") });
       const url = URL.createObjectURL(makeZip(out));
@@ -878,6 +936,16 @@
       if (original) { try { (await getOutput()).send(original); } catch { /* the CT may be gone */ } }
       S.busy = false; S.recording = false; setBusy(false);
     }
+  }
+
+  // All notes off / all sound off on the synth channel, then wait until the input is quiet (levels.csv tail_db, max 4 s).
+  async function waitForSilence(output) {
+    const ch = clamp(+S.ui.channel || 1, 1, 16) - 1;
+    try { output.send([0xB0 | ch, 123, 0]); output.send([0xB0 | ch, 120, 0]); } catch { /* port gone */ }
+    const limit = Math.pow(10, S.data.levels.tail_db / 20), end = Date.now() + 4000;
+    await sleep(200);
+    while (Date.now() < end && (S.audio?.level ?? 0) > limit) await sleep(100);
+    await sleep(150);
   }
 
   const audioError = e => e && (e.name === "NotAllowedError" || e.name === "NotFoundError" || e.name === "OverconstrainedError") ? T("status_no_audio") : errorText(e);
@@ -952,6 +1020,7 @@
     ui.bInputs = el("button", { onclick: () => fillInputs() }); ui.bInputs.style.cssText = btnStyle;
     ui.bRec = el("button", { onclick: () => recordCurrent() }); ui.bRec.style.cssText = btnStyle; ui.buttons.push(ui.bRec);
     ui.bBatch = el("button", { onclick: () => recordBatch() }); ui.bBatch.style.cssText = btnStyle; ui.buttons.push(ui.bBatch);
+    ui.check = el("input", { type: "checkbox", onchange: () => { S.ui.levelCheck = ui.check.checked; save(); } }); ui.checkLabel = el("label");
     const recRow = el("div"); recRow.style.cssText = "display:flex;gap:6px;align-items:center;margin:4px 0;flex-wrap:wrap;"; recRow.append(ui.bRec, ui.bBatch);
     ui.locksTitle = el("div"); ui.lockBoxes = {};
     const locks = el("div"); locks.style.cssText = "display:grid;grid-template-columns:1fr 1fr;gap:2px 8px;margin:4px 0 8px;";
@@ -971,7 +1040,7 @@
     const row = (label, ...controls) => { const r = el("div"); r.style.cssText = "margin:4px 0;display:flex;gap:6px;align-items:center;flex-wrap:wrap;"; r.append(label, ...controls); return r; };
     ui.body.append(row(ui.typeLabel, ui.type), row(ui.intLabel, ui.int, ui.intVal), buttons, saveRow, ui.locksTitle, locks,
       row(ui.auto, ui.autoLabel), playRow, row(ui.phraseLabel, ui.phrase), row(ui.channelLabel, ui.channel),
-      ui.recTitle, row(ui.inputLabel, ui.input, ui.bInputs), recRow, ui.status, ui.histTitle, ui.hist);
+      ui.recTitle, row(ui.inputLabel, ui.input, ui.bInputs), row(ui.check, ui.checkLabel), recRow, ui.status, ui.histTitle, ui.hist);
     for (const sel of [ui.type, ui.phrase, ui.channel]) { sel.style.cssText = fieldStyle; for (const o of sel.options) o.style.cssText = "background:#1b1f3a;color:#fff;"; }
     ui.int.style.accentColor = "#7796ff";
     ui.root.append(head, ui.body);
@@ -1003,6 +1072,7 @@
     ui.recTitle.textContent = T("rec_title"); ui.inputLabel.textContent = T("input_label");
     ui.bInputs.textContent = T("btn_inputs"); ui.bInputs.title = T("tip_inputs");
     if (!ui.input.options.length) ui.input.append(el("option", { value: S.ui.inputId || "", textContent: T("input_default") }));
+    ui.check.checked = !!S.ui.levelCheck; ui.checkLabel.textContent = T("level_check"); ui.checkLabel.title = T("tip_level_check");
     ui.bRec.textContent = T("btn_rec"); ui.bRec.title = T("tip_rec");
     ui.bBatch.textContent = T("btn_batch"); ui.bBatch.title = T("tip_batch");
     if (!ui.status.textContent) ui.status.textContent = T("status_idle");

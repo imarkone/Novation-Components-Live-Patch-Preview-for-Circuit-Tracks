@@ -39,7 +39,7 @@ Open **Circuit Tracks → Synth** and open or create a patch. A panel appears at
 - **Mutate** – small changes to the current sound; its character stays.
 - **Group locks** – checked groups are not changed.
 - **Undo** and a **history** of the last 20 sounds (starred ones are kept).
-- Safety rules keep sounds audible: minimum mixer level, release, open filter when nothing modulates it, oscillator semitones within ±24, no matrix routing that silences a source.
+- Safety rules keep sounds audible (derived from recorded test batches): minimum mixer level, filter frequency + filter envelope + matrix modulation ≥ 60 for lowpass/bandpass, EQ gains within ±18 dB, lowest pitch not below −36 semitones, no endless release, oscillator semitones within ±24, no matrix routing that silences a source.
 
 Components sends every change to the Circuit Tracks synth track that is selected in Components. Use MIDI channel 1 for Synth 1 and 2 for Synth 2. **Keyboard Octave** applies to the Circuit Tracks pads, not to incoming MIDI notes, so the extension shifts its phrases by that value.
 
@@ -57,7 +57,9 @@ The Circuit Tracks sends no audio over USB. Connect its line outputs to an audio
 2. **● WAV** records the current sound (phrase + 1.5 s tail).
 3. **● Batch .syx → WAV** – choose several `.syx` files. Each is sent to the Circuit Tracks, played and recorded. You get one ZIP with a WAV per file and `analysis.csv` (peak, RMS, clipped samples, silence, L/R correlation, spectral centroid). The original patch is restored at the end.
 
-Browser echo cancellation, noise suppression and auto gain are switched off so levels stay comparable. Keep the interface gain fixed for all recordings.
+Browser echo cancellation, noise suppression and auto gain are switched off so levels stay comparable. Keep the interface gain fixed for all recordings. Between batch files the extension sends All Notes Off and waits until the input is quiet, so a long release does not leak into the next recording.
+
+**Level check after Random** (needs a selected input): the phrase played after Random is recorded and measured. If it is silent, Random runs again (up to 3 times); if it overloads, the mixer levels are lowered. Thresholds are in `data/levels.csv` (dBFS at your interface gain).
 
 ## Files
 
@@ -70,6 +72,7 @@ Browser echo cancellation, noise suppression and auto gain are switched off so l
 | `data/recipes.csv` | Per-type wildness and default phrase. |
 | `data/phrases.csv` | Note phrases used for playback. |
 | `data/corpus.csv` | Decoded factory/community patches used as donors. |
+| `data/levels.csv` | Level check thresholds (silence, overload, retries, tail). |
 
 ## Troubleshooting
 
