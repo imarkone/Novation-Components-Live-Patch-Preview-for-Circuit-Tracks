@@ -1,0 +1,8 @@
+type,jitter,wild,phrase
+any,0.8,1.0,melody
+bass,0.3,0.15,melody
+lead,0.4,0.3,melody
+pad,0.4,0.3,chords
+pluck,0.4,0.3,melody
+keys,0.4,0.3,chords
+fx,0.8,0.8,single

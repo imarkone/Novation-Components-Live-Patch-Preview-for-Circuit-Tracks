@@ -1,45 +1,80 @@
-# Patch Preview for Circuit Tracks
+# Circuit Tracks Patch Preview and Random Sound Generator
 
-A free, independent Chrome and Edge extension that plays the selected patch in the web version of Novation Components through your own Circuit Tracks.
+A free, independent Chrome and Edge extension for the **Novation Circuit Tracks** in the web version of Novation Components:
+
+- **Patch preview** – play the selected patch from a pack on your Circuit Tracks before you load it.
+- **Random / Mutate** – generate new synth sounds directly in the Components synth editor. The knobs move, so you can see and fine-tune what was generated.
+- **Open .syx / Save .syx** – load a patch file into the editor with one click, and save the current sound from the Circuit Tracks as `.syx` (plus an optional debug JSON).
+- **Play / Loop** – play a short phrase of the current sound, or repeat it every 1–9 seconds while you turn knobs.
+- **WAV recording** – record the Circuit Tracks output through an audio interface, one sound or a whole batch of `.syx` files, with a level and brightness analysis (`analysis.csv`).
 
 ![Three audition buttons below Category in an example patch panel](docs/patch-panel.png)
-
-*Illustrative patch panel showing where the three extension buttons appear.*
 
 ## Install
 
 1. Download and extract the repository ZIP. Open the folder that contains `manifest.json`.
 2. In Chrome open `chrome://extensions`. In Edge open `edge://extensions`.
-3. Enable **Developer mode**, click **Load unpacked**, and select that folder. Disable an earlier copy of this extension before loading the new one.
-4. Open or refresh [Novation Components](https://components.novationmusic.com/) in the same browser.
+3. Enable **Developer mode**, click **Load unpacked**, and select that folder. Remove an earlier copy of this extension first.
+4. Open or refresh [Novation Components](https://components.novationmusic.com/) in the same browser. Allow MIDI and SysEx access when asked.
 
-## Audition a patch
+## Patch preview (Packs)
 
-1. Connect a Circuit Tracks by USB. Listen via its headphone jack or line outputs. Close desktop Components and any DAW using the same MIDI port.
-2. Stop playback on Circuit Tracks. The extension uses the default MIDI channel 1 for **Synth 1**.
-3. In web Components, open **Circuit Tracks → Packs → Patches** and select a populated slot. The buttons appear beneath **Category**. Allow MIDI and SysEx access if prompted.
-4. Try one of the three previews:
+Open **Circuit Tracks → Packs → Patches** and select a populated slot. Three buttons appear below **Category**:
 
-   | Button | What it plays |
-   | --- | --- |
-   | **Single C3/C5** | C3 and C5 separately, each at the same velocity. The extension uses scientific pitch notation, where MIDI 60 is middle C (C4). It sends MIDI notes 48 and 72. |
-   | **Melody** | A two-bar C minor rave arpeggio at 144 BPM. |
-   | **Chords** | Short rave-style triads. Use a polyphonic patch to hear all three notes together. |
+| Button | What it plays |
+| --- | --- |
+| **Single C3/C5** | MIDI notes 48 and 72 (scientific pitch notation, middle C = C4 = MIDI 60). |
+| **Melody** | A two-bar C minor rave arpeggio at 144 BPM. |
+| **Chords** | Short rave-style triads. |
 
-5. Wait for **Original patch restored and verified** before unplugging the device or changing its patch.
+The extension reads the active Synth 1 patch, loads the selected sound into temporary RAM, checks it, plays the notes and restores the original patch. Nothing is written to a pack or a preset slot.
 
-## What the preview does
+## Random sound generator (Synth editor)
 
-The extension reads the active Synth 1 patch, loads the selected sound into its temporary RAM, and checks the result before playing the notes. It sends Note Off messages, restores the original patch, and checks it again. Auditioning does not write to a saved pack or a preset slot.
+Open **Circuit Tracks → Synth** and open or create a patch. A panel appears at the top right.
 
-The extension runs only on `components.novationmusic.com`. It has no accounts, analytics, or separate server. Patch bytes and MIDI traffic stay on your computer and instrument. This community project is independent of Novation and Focusrite.
+- **Sound type** – Any, Bass, Lead, Pad, Pluck, Keys, FX.
+- **Random** – builds a new sound from sections of real patches (`data/corpus.csv`, 516 patches decoded from the Novation packs): oscillators + mixer + voice from one patch, filter, envelopes, LFOs, effects and the modulation matrix from others. Every unlocked section is replaced.
+- **Intensity** – wildness. 0 = clean sections of real patches; 100 = random variation, extreme chorus/phaser and distortion values and extra modulation-matrix routings.
+- **Mutate** – small changes to the current sound; its character stays.
+- **Group locks** – checked groups are not changed.
+- **Undo** and a **history** of the last 20 sounds (starred ones are kept).
+- Safety rules keep sounds audible: minimum mixer level, release, open filter when nothing modulates it, oscillator semitones within ±24, no matrix routing that silences a source.
+
+Components sends every change to the Circuit Tracks synth track that is selected in Components. Use MIDI channel 1 for Synth 1 and 2 for Synth 2. **Keyboard Octave** applies to the Circuit Tracks pads, not to incoming MIDI notes, so the extension shifts its phrases by that value.
+
+### Open and save `.syx`
+
+- **Open .syx** loads a patch file into the editor knobs (everything except macros and the patch name).
+- **Save .syx** reads the current sound from the Circuit Tracks (SysEx dump of Synth 1 or 2) and downloads it as `Rnd <type> <intensity> #<number>.syx`. Upload it in Components via **Packs** as usual.
+- **JSON (debug)** also saves the generator settings, seed, donor patches and all values.
+
+### WAV recording
+
+The Circuit Tracks sends no audio over USB. Connect its line outputs to an audio interface input.
+
+1. Click **Load inputs**, allow microphone access and choose the interface input.
+2. **● WAV** records the current sound (phrase + 1.5 s tail).
+3. **● Batch .syx → WAV** – choose several `.syx` files. Each is sent to the Circuit Tracks, played and recorded. You get one ZIP with a WAV per file and `analysis.csv` (peak, RMS, clipped samples, silence, L/R correlation, spectral centroid). The original patch is restored at the end.
+
+Browser echo cancellation, noise suppression and auto gain are switched off so levels stay comparable. Keep the interface gain fixed for all recordings.
+
+## Files
+
+| File | Purpose |
+| --- | --- |
+| `preview.js` | Patch preview on the Packs page. |
+| `random.js` | Random / Mutate panel, .syx open/save, playback, WAV recording. |
+| `loader.js` | Passes the CSV data files to `random.js`. |
+| `data/lang.csv` | All panel texts (Slovak and English). |
+| `data/recipes.csv` | Per-type wildness and default phrase. |
+| `data/phrases.csv` | Note phrases used for playback. |
+| `data/corpus.csv` | Decoded factory/community patches used as donors. |
 
 ## Troubleshooting
 
-- **No buttons** — refresh web Components, open **Patches**, and select one populated slot. Updates to Components may require an extension update.
-- **No sound** — check the instrument's audio output, Synth 1 MIDI channel, and permission to access MIDI/SysEx. Close other applications using the MIDI port.
-- **Restoration could not be verified** — select your original preset on the hardware again. This restores the saved preset settings. Reloading a saved preset can discard temporary edits you made before auditioning.
+- **No panel** – refresh Components and open the Synth editor.
+- **No sound** – check the Circuit Tracks audio output, the MIDI channel in the panel and MIDI/SysEx permission. Close other applications using the MIDI port.
+- **Restoration could not be verified** (preview) – select your original preset on the hardware again.
 
-The MIDI commands are described in the [Circuit Tracks Programmer's Reference Guide V3](https://fael-downloads-prod.focusrite.com/customer/prod/downloads/circuit_tracks_programmer_s_reference_guide_v3.pdf).
-
-The melody was written for this extension. The chord preview preserves the Gemini-generated MIDI phrase supplied for prior releases.
+The MIDI and SysEx commands are described in the [Circuit Tracks Programmer's Reference Guide V3](https://fael-downloads-prod.focusrite.com/customer/prod/downloads/circuit_tracks_programmer_s_reference_guide_v3.pdf). This community project is independent of Novation and Focusrite. It runs only on `components.novationmusic.com`, has no accounts, analytics or server, and all MIDI and audio stay on your computer.

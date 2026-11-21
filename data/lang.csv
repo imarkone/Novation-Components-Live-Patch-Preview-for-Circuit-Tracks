@@ -1,0 +1,85 @@
+key,sk,en
+panel_title,Náhodný zvuk,Random sound
+type_label,Typ zvuku,Sound type
+type_any,Ľubovoľný,Any
+type_bass,Bass,Bass
+type_lead,Lead,Lead
+type_pad,Pad,Pad
+type_pluck,Pluck,Pluck
+type_keys,Keys,Keys
+type_fx,FX,FX
+intensity,Intenzita,Intensity
+btn_random,Random,Random
+btn_mutate,Mutuj,Mutate
+btn_undo,Späť,Undo
+btn_stop,Stop,Stop
+locks,Zámky skupín (zaškrtnuté = nemení sa),Group locks (checked = unchanged)
+lock_osc,Oscilátory,Oscillators
+lock_mixer,Mixer,Mixer
+lock_filter,Filter,Filter
+lock_env,Obálky,Envelopes
+lock_lfo,LFO,LFO
+lock_matrix,Mod matica,Mod matrix
+lock_chorus,Chorus/Phaser,Chorus/Phaser
+lock_eq,EQ,EQ
+lock_dist,Distortion,Distortion
+lock_voice,Voice,Voice
+autoplay,Po zmene zahrať úryvok,Play a phrase after a change
+phrase_label,Úryvok,Phrase
+phrase_auto,Podľa typu,By type
+phrase_single,Jedna nota,Single note
+phrase_melody,Melódia,Melody
+phrase_chords,Akordy,Chords
+channel,"MIDI kanál (Synth 1 = 1, Synth 2 = 2)","MIDI channel (Synth 1 = 1, Synth 2 = 2)"
+history,História (posledných {n}),History (last {n})
+hist_empty,Zatiaľ prázdna.,Empty so far.
+hist_apply,Použiť,Apply
+hist_star,Obľúbené,Favourite
+kind_random,Random,Random
+kind_mutate,Mutuj,Mutate
+status_idle,Pripravené.,Ready.
+status_reading,Čítam editor…,Reading the editor…
+status_applying,Nastavujem {n} hodnôt…,Setting {n} values…
+status_done,Hotovo: zmenených {n} hodnôt.,Done: {n} values changed.
+status_undo_empty,Nie je kam sa vrátiť.,Nothing to undo.
+status_undo_done,Vrátené.,Restored.
+status_no_midi,MIDI nie je dostupné (Chrome alebo Edge a povolenie MIDI).,MIDI is not available (Chrome or Edge and MIDI permission).
+status_no_port,Circuit Tracks cez USB sa nenašiel.,Circuit Tracks was not found on USB.
+status_playing,Hrá úryvok · kanál {ch} · {port} · okt. {oct},Playing phrase · channel {ch} · {port} · oct {oct}
+status_error,Chyba: {msg},Error: {msg}
+status_busy,"Prebieha zmena, počkaj.","A change is running, wait."
+collapse_open,Otvoriť,Open
+collapse_close,Zbaliť,Collapse
+lang_toggle,EN,SK
+tip_random,"Nový zvuk: vždy vymení všetky odomknuté sekcie za časti skutočných patchov. Intenzita = divokosť (0 = čisté patche, 100 = extrémy).","New sound: always replaces every unlocked section with parts of real patches. Intensity = wildness (0 = clean patches, 100 = extremes)."
+tip_mutate,"Mutácia: len mierne zmení aktuálny zvuk, charakter zostane. Intenzita = veľkosť zmeny.","Mutate: only nudges the current sound, its character stays. Intensity = size of the change."
+btn_save,Uložiť .syx,Save .syx
+tip_save,"Stiahne aktuálny zvuk z Circuit Tracks ako .syx (názov = typ, intenzita, poradie). Nahráš ho do Components cez Packs.","Downloads the current sound from the Circuit Tracks as .syx (name = type, intensity, number). Upload it in Components via Packs."
+debug_json,JSON (debug),JSON (debug)
+status_saving,Čítam zvuk z CT…,Reading the sound from the CT…
+status_saved,Uložené: {name},Saved: {name}
+status_save_channel,Export funguje len pre kanál 1 alebo 2 (Synth 1 alebo 2).,Export works only for channel 1 or 2 (Synth 1 or 2).
+status_save_timeout,CT neodpovedala na žiadosť o zvuk.,The CT did not answer the patch request.
+btn_open,Otvoriť .syx,Open .syx
+tip_open,Načíta .syx do editora (všetky gombíky okrem makier a názvu). Components ho hneď pošle do CT.,Loads a .syx into the editor (all knobs except macros and the name). Components sends it to the CT right away.
+status_opened,Otvorené: {name} ({n} zmien).,Opened: {name} ({n} changes).
+status_bad_syx,{name} nie je synth patch Circuit Tracks.,{name} is not a Circuit Tracks synth patch.
+btn_play,▶ Play,▶ Play
+btn_loop,⟳ Loop,⟳ Loop
+btn_loop_stop,■ Loop,■ Loop
+tip_loop,"Opakuje úryvok, medzi opakovaniami pauza podľa posuvníka. Stop alebo opätovné kliknutie zastaví.",Repeats the phrase with the pause set by the slider. Stop or another click ends it.
+status_loop_wait,Loop: pauza {s} s…,Loop: pause {s} s…
+rec_title,Nahrávanie WAV (výstup CT → zvukovka),WAV recording (CT output → audio interface)
+input_label,Vstup,Input
+input_default,Predvolený vstup,Default input
+btn_inputs,Načítať vstupy,Load inputs
+tip_inputs,Vypýta povolenie mikrofónu a načíta zoznam vstupov zvukovky.,Asks for microphone permission and lists the audio inputs.
+btn_rec,● WAV,● WAV
+tip_rec,"Zahrá úryvok aktuálneho zvuku, nahrá ho aj s doznením a stiahne WAV.","Plays the phrase of the current sound, records it with its tail and downloads a WAV."
+btn_batch,● Dávka .syx → WAV,● Batch .syx → WAV
+tip_batch,"Vyber viac .syx: každý pošle do CT, zahrá, nahrá. Výsledok je jeden ZIP s WAV a analysis.csv. Pôvodný patch sa na konci vráti.","Choose several .syx files: each is sent to the CT, played and recorded. Result: one ZIP with WAVs and analysis.csv. The original patch is restored at the end."
+status_recording,Nahrávam…,Recording…
+status_recorded,Uložené {name}.wav · RMS {rms} dB · špička {peak} dB,Saved {name}.wav · RMS {rms} dB · peak {peak} dB
+status_batch,Dávka {i}/{n}: {name},Batch {i}/{n}: {name}
+status_batch_done,Dávka hotová: {n} nahrávok v ZIP.,Batch done: {n} recordings in the ZIP.
+status_no_audio,Vstup zvukovky nie je dostupný (povolenie mikrofónu alebo zlý vstup).,The audio input is not available (microphone permission or wrong input).
