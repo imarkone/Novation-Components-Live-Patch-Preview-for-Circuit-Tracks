@@ -34,12 +34,12 @@ The extension reads the active Synth 1 patch, loads the selected sound into temp
 Open **Circuit Tracks → Synth** and open or create a patch. A panel appears at the top right.
 
 - **Sound type** – Any, Bass, Lead, Pad, Pluck, Keys, FX.
-- **Random** – builds a new sound from sections of real patches (`data/corpus.csv`, 516 patches decoded from the Novation packs): oscillators + mixer + voice from one patch, filter, envelopes, LFOs, effects and the modulation matrix from others. Every unlocked section is replaced.
+- **Random** – builds a new sound from sections of real patches (`data/corpus.csv`, 481 audible patches decoded from the Novation packs): oscillators + mixer + voice from one patch, filter, envelopes, LFOs, effects and the modulation matrix from others. Every unlocked section is replaced.
 - **Intensity** – wildness. 0 = clean sections of real patches; 100 = random variation, extreme chorus/phaser and distortion values and extra modulation-matrix routings.
 - **Mutate** – small changes to the current sound; its character stays.
 - **Group locks** – checked groups are not changed.
 - **Undo** and a **history** of the last 20 sounds (starred ones are kept).
-- Safety rules keep sounds audible (derived from recorded test batches): minimum mixer level, filter frequency + filter envelope + matrix modulation ≥ 60 for lowpass/bandpass, EQ gains within ±18 dB, lowest pitch not below −36 semitones, no endless release, oscillator semitones within ±24, no matrix routing that silences a source.
+- A few safety rules (minimum mixer level, no endless release, oscillator semitones within ±24, no matrix routing that silences a source). Each rule changes at most a handful of the 481 real patches in the corpus; loudness itself is handled by the level check.
 
 Components sends every change to the Circuit Tracks synth track that is selected in Components. Use MIDI channel 1 for Synth 1 and 2 for Synth 2. **Keyboard Octave** applies to the Circuit Tracks pads, not to incoming MIDI notes, so the extension shifts its phrases by that value.
 
@@ -59,7 +59,7 @@ The Circuit Tracks sends no audio over USB. Connect its line outputs to an audio
 
 Browser echo cancellation, noise suppression and auto gain are switched off so levels stay comparable. Keep the interface gain fixed for all recordings. Between batch files the extension sends All Notes Off and waits until the input is quiet, so a long release does not leak into the next recording.
 
-**Level check after Random** (needs a selected input): the phrase played after Random is recorded and measured. If it is silent, Random runs again (up to 3 times); if it overloads, the mixer levels are lowered. Thresholds are in `data/levels.csv` (dBFS at your interface gain).
+**Level check and levelling after Random** (needs a selected input): the phrase played after Random is recorded and measured (loudest 50 ms). A silent sound is replaced by a new Random (up to 3 times). A sound outside the target range is brought to the target by scaling the mixer levels, then measured again. The target comes from recorded factory patches: they peaked between −30 and −12 dBFS at the author's interface gain, typically −21. Change `data/levels.csv` if your gain differs.
 
 ## Files
 
@@ -72,7 +72,7 @@ Browser echo cancellation, noise suppression and auto gain are switched off so l
 | `data/recipes.csv` | Per-type wildness and default phrase. |
 | `data/phrases.csv` | Note phrases used for playback. |
 | `data/corpus.csv` | Decoded factory/community patches used as donors. |
-| `data/levels.csv` | Level check thresholds (silence, overload, retries, tail). |
+| `data/levels.csv` | Level check: target, tolerance, silence and peak limits, retries, tail. |
 
 ## Troubleshooting
 

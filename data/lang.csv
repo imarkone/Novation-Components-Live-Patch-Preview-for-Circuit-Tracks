@@ -83,9 +83,11 @@ status_recorded,Uložené {name}.wav · RMS {rms} dB · špička {peak} dB,Saved
 status_batch,Dávka {i}/{n}: {name},Batch {i}/{n}: {name}
 status_batch_done,Dávka hotová: {n} nahrávok v ZIP.,Batch done: {n} recordings in the ZIP.
 status_no_audio,Vstup zvukovky nie je dostupný (povolenie mikrofónu alebo zlý vstup).,The audio input is not available (microphone permission or wrong input).
-level_check,Kontrola hlasitosti po Random,Level check after Random
-tip_level_check,"Po Random sa úryvok zároveň nahrá zo zvukovky. Ticho = nový Random (najviac podľa levels.csv), preťaženie = stíši mixer. Prahy v data/levels.csv.","After Random the phrase is also recorded from the interface. Silence = new Random (up to levels.csv), overload = mixer is lowered. Thresholds in data/levels.csv."
+level_check,Kontrola a vyrovnanie hlasitosti,Level check and levelling
+tip_level_check,"Po Random sa úryvok nahrá zo zvukovky. Ticho = nový Random, mimo cieľa = mixer sa nastaví na cieľovú hlasitosť (továrenské patche). Prahy v data/levels.csv.","After Random the phrase is recorded from the interface. Silence = new Random, off target = mixer is set to the target level (factory patches). Thresholds in data/levels.csv."
 status_retry,"Ticho ({max} dB), skúšam znova {i}/{n}…","Silent ({max} dB), trying again {i}/{n}…"
 status_quiet,Stále ticho ({max} dB). Skús iný typ alebo intenzitu.,Still silent ({max} dB). Try another type or intensity.
 status_too_loud,"Preťažené ({peak} dB), mixer stíšený.","Overloaded ({peak} dB), mixer lowered."
 status_level_ok,"Hlasitosť OK: max {max} dB, špička {peak} dB.","Level OK: max {max} dB, peak {peak} dB."
+status_level_fixed,Hlasitosť vyrovnaná: {from} → {to} dB (cieľ {target} dB).,Level adjusted: {from} → {to} dB (target {target} dB).
+status_level_limit,"Hlasitosť {max} dB, mixer už nemá rezervu.","Level {max} dB, the mixer has no headroom left."

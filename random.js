@@ -45,7 +45,7 @@
     const types = {};
     for (const r of parseCsv(files.recipes)) types[r.type] = { jitter: +r.jitter, wild: +r.wild, phrase: r.phrase };
     // data/levels.csv: thresholds for the audio level check (dBFS at the user's interface gain).
-    const levels = { quiet_db: -45, loud_db: -3, retries: 3, tail_db: -60 };
+    const levels = { target_db: -21, tolerance_db: 7, silent_db: -40, peak_db: -1, retries: 3, tail_db: -60 };
     for (const r of parseCsv(files.levels || "key,value\n")) if (r.key in levels) levels[r.key] = +r.value;
     const corpus = parseCsv(files.corpus).map(r => Object.fromEntries(Object.entries(r).map(([k, v]) => [k, v !== "" && k !== "mx" && !isNaN(+v) ? +v : v])));
     const phrases = {};
@@ -354,7 +354,9 @@
       for (const p of PARAMS) {
         if (p.group !== g || cur[p.key] === undefined) continue;
         const m = meta[p.key];
-        if (p.kind === "slider") next[p.key] = Math.round(m.min + rnd() * (m.max - m.min));
+        // Factory reference patches keep distortion level at about 70 or below; higher wild values were far too loud.
+        const top = p.key === "dist.level" ? Math.min(m.max, 70) : m.max;
+        if (p.kind === "slider") next[p.key] = Math.round(m.min + rnd() * (top - m.min));
         else if (m.options) next[p.key] = pickOne(m.options);
       }
     }
@@ -415,44 +417,24 @@
   }
 
   // Safety rules applied to the merged result. They only touch values whose group is not locked.
+  // Rule of thumb, checked against the 516 decoded real patches (data/corpus.csv): a rule may change at most a handful of
+  // real patches. Loudness itself is handled by the level check, which measures the sound (data/levels.csv).
   function applyGuards(cur, next, locks) {
     const m = { ...cur, ...next };
     const put = (key, value) => { if (!locks[GROUP_OF[key]] && cur[key] !== undefined) { m[key] = value; next[key] = value; } };
     const levels = ["mix.osc1", "mix.osc2", "mix.noise", "mix.ring"];
-    if (Math.max(...levels.map(l => m[l] ?? 0)) < 50) put("mix.osc1", 100);
-    const sum = levels.reduce((a, l) => a + (m[l] ?? 0), 0);
-    if (sum > 300) for (const l of levels) put(l, Math.round((m[l] ?? 0) * 300 / sum));
-    if ((m["env1.r"] ?? 99) < 8) put("env1.r", 8);
+    // Many real patches have all mixer levels low and open a source through the matrix (Direct -> Osc Level).
+    const matrixLevel = Object.keys(m).some(key => /^mx\.\d+\.dest$/.test(key) && /Level$/.test(String(m[key])) && (m[key.replace("dest", "depth")] ?? 0) > 10);
+    if (Math.max(...levels.map(l => m[l] ?? 0)) < 50 && !matrixLevel) put("mix.osc1", 100);
     if ((m["env1.s"] ?? 99) < 8 && (m["env1.d"] ?? 99) < 8) put("env1.d", 30);
     if ((m["env1.a"] ?? 0) > 110) put("env1.a", 110);
     const type = String(m["flt.type"] || "");
-    if (type.startsWith("Lowpass") && (m["flt.freq"] ?? 127) < 25) put("flt.freq", 25);
     if (type.startsWith("Highpass") && (m["flt.freq"] ?? 0) > 100) put("flt.freq", 100);
     for (const key of ["osc1.semi", "osc2.semi"]) if (Math.abs(m[key] ?? 0) > 24) put(key, clamp(m[key], -24, 24));
-    // Measured (WAV batch 2026-11): lowpass/bandpass sounds were inaudible when frequency + 0.8 x filter envelope < 60.
-    // Matrix routings to Frequency count at half their depth.
-    const matrixOpen = Object.keys(m).filter(key => /^mx\.\d+\.dest$/.test(key) && m[key] === "Frequency")
-      .reduce((sum, key) => sum + 0.5 * Math.abs(m[key.replace("dest", "depth")] ?? 0), 0);
-    const boost = 0.8 * Math.max(0, m["flt.env2"] ?? 0) + matrixOpen;
-    if ((type.startsWith("Lowpass") || type.startsWith("Bandpass")) && (m["flt.freq"] ?? 127) + boost < 60)
-      put("flt.freq", Math.round(clamp(60 - boost, 0, 127)));
-    // EQ boosts of +41 dB clipped, cuts of -64 dB silenced the sound.
-    for (const key of ["eq.lg", "eq.mg", "eq.hg"]) if (Math.abs(m[key] ?? 0) > 18) put(key, clamp(m[key], -18, 18));
-    // Lowest audible pitch: keyboard octave x 12 + semitones of the louder-used oscillators must stay >= -36.
-    const audible = [["osc1.semi", "mix.osc1"], ["osc2.semi", "mix.osc2"]].filter(([, lvl]) => (m[lvl] ?? 0) >= 30).map(([semi]) => m[semi] ?? 0);
-    const lowest = 12 * (m["voice.octave"] ?? 0) + (audible.length ? Math.min(...audible) : 0);
-    if (lowest < -36) {
-      const raise = Math.ceil((-36 - lowest) / 12);
-      if (!locks.voice && cur["voice.octave"] !== undefined) put("voice.octave", (m["voice.octave"] ?? 0) + raise);
-      else for (const key of ["osc1.semi", "osc2.semi"]) put(key, clamp((m[key] ?? 0) + 12 * raise, -24, 24));
-    }
-    // A very long release with no sustain kept ringing into the next recording.
+    // A very long release with no sustain kept ringing into the next recording (test batch 2026-11).
     if ((m["env1.s"] ?? 127) < 10 && (m["env1.r"] ?? 0) > 100) put("env1.r", 90);
-    if ((m["env1.r"] ?? 0) > 115) put("env1.r", 115);
     if ((m["flt.res"] ?? 0) > 100 && (m["flt.drive"] ?? 0) > 50) put("flt.res", 85);
-    if ((m["dist.level"] ?? 0) > 90) put("dist.level", 90);
     if (/Reducer/.test(String(m["dist.type"] || "")) && (m["dist.level"] ?? 0) > 60) put("dist.level", 60);
-    if (m["voice.mode"] === "Poly" && (m["voice.port"] ?? 0) > 20) put("voice.port", 0);
     return next;
   }
 
@@ -490,32 +472,45 @@
     if (retry) await run(kind, attempt + 1);
   }
 
-  // Plays the phrase while recording the audio interface input and measures it.
-  // Too quiet -> returns true (caller generates again, up to levels.csv "retries"). Too loud -> mixer levels are lowered.
+  // Plays the phrase while recording the audio interface input and measures it (loudest 50 ms = max_db).
+  // Silent (below levels.csv silent_db) -> returns true, the caller generates again (up to "retries").
+  // Outside target_db +- tolerance_db (factory patches recorded at the user's gain) -> mixer levels are scaled to the target
+  // and the phrase is recorded once more to report the result. Peak is kept below peak_db.
+  const MIX_KEYS = ["mix.osc1", "mix.osc2", "mix.ring", "mix.noise"];
   async function levelCheck(kind, attempt) {
     const L = S.data.levels;
-    let rec;
-    try { rec = await recordPhrase(S.octave); }
+    let a;
+    try { a = analyse(await recordPhrase(S.octave)); }
     catch (e) {
       // No usable input: still play the phrase so the sound can be heard.
       status(audioError(e));
       if (!S.timers.length) await playPhrase(S.octave).catch(() => {});
       return false;
     }
-    const a = analyse(rec);
-    if (a.max_db < L.quiet_db) {
+    if (a.max_db < L.silent_db) {
       if (kind === "random" && attempt < L.retries) { status(T("status_retry", { max: a.max_db, i: attempt + 1, n: L.retries })); return true; }
       status(T("status_quiet", { max: a.max_db })); return false;
     }
-    if (a.peak_db > L.loud_db && !S.ui.locks.mixer) {
-      const factor = Math.pow(10, (L.loud_db - 3 - a.peak_db) / 20), values = {};
-      for (const key of ["mix.osc1", "mix.osc2", "mix.ring", "mix.noise"]) if (S.last.values[key] !== undefined) values[key] = Math.round(S.last.values[key] * factor);
-      await applyState(values);
-      Object.assign(S.last.values, values); S.history[0].values = { ...S.last.values }; save();
-      status(T("status_too_loud", { peak: a.peak_db }));
-      return false;
-    }
-    status(T("status_level_ok", { max: a.max_db, peak: a.peak_db }));
+    let gainDb = 0;
+    if (Math.abs(a.max_db - L.target_db) > L.tolerance_db) gainDb = L.target_db - a.max_db;
+    gainDb = Math.min(gainDb, L.peak_db - a.peak_db);
+    if (gainDb === 0 || S.ui.locks.mixer || !S.last) { status(T("status_level_ok", { max: a.max_db, peak: a.peak_db })); return false; }
+    const now = MIX_KEYS.filter(key => S.last.values[key] !== undefined);
+    const loudest = Math.max(1, ...now.map(key => S.last.values[key]));
+    let factor = Math.pow(10, gainDb / 20);
+    if (loudest * factor > 127) factor = 127 / loudest;
+    if (Math.abs(factor - 1) < 0.05) { status(T("status_level_limit", { max: a.max_db })); return false; }
+    const values = {};
+    for (const key of now) values[key] = Math.round(clamp(S.last.values[key] * factor, 0, 127));
+    await applyState(values);
+    Object.assign(S.last.values, values);
+    if (S.history[0]) S.history[0].values = { ...S.last.values };
+    save();
+    await sleep(200);
+    try {
+      const b = analyse(await recordPhrase(S.octave));
+      status(T("status_level_fixed", { from: a.max_db, to: b.max_db, target: L.target_db }));
+    } catch (e) { status(audioError(e)); }
     return false;
   }
 
@@ -658,7 +653,7 @@
       download(base + ".syx", "application/octet-stream", bytes);
       if (S.ui.debug) {
         const editor = await readAll();
-        const report = { tool: "ct-random 0.7.4", name: label, kind: info.kind, type: info.type, intensity: info.intensity, locks: info.locks, seed: info.seed,
+        const report = { tool: "ct-random 0.7.5", name: label, kind: info.kind, type: info.type, intensity: info.intensity, locks: info.locks, seed: info.seed,
           synth: S.ui.channel, donors: info.donors, generated: info.values, editorAtExport: editor.cur, patchBytes: Array.from(bytes) };
         download(base + ".json", "application/json", JSON.stringify(report, null, 1));
       }
@@ -832,7 +827,7 @@
       for (let k = 1; k < size / 2; k++) { const mag = Math.hypot(re[k], im[k]); num += mag * k * sampleRate / size; den += mag; }
     }
     return {
-      peak_db: db(peak), rms_db: db(rms), max_db: db(maxWin), clipped: clips, silent: db(maxWin) < S.data.levels.quiet_db ? 1 : 0,
+      peak_db: db(peak), rms_db: db(rms), max_db: db(maxWin), clipped: clips, silent: db(maxWin) < S.data.levels.silent_db ? 1 : 0, dev_db: Math.round(10 * (db(maxWin) - S.data.levels.target_db)) / 10,
       lr_corr: ll && rr ? Math.round(1000 * lr / Math.sqrt(ll * rr)) / 1000 : 1, centroid_hz: den ? Math.round(num / den) : 0
     };
   }
@@ -882,7 +877,7 @@
     return new Blob([...parts, ...central, new Uint8Array(end.buffer)], { type: "application/zip" });
   }
 
-  const ANALYSIS_COLUMNS = ["file", "patch_name", "octave", "max_db", "peak_db", "rms_db", "clipped", "silent", "lr_corr", "centroid_hz", "sample_rate", "device_channels"];
+  const ANALYSIS_COLUMNS = ["file", "patch_name", "octave", "max_db", "dev_db", "peak_db", "rms_db", "clipped", "silent", "lr_corr", "centroid_hz", "sample_rate", "device_channels"];
   const csvRow = values => values.map(x => /[",\n]/.test(String(x)) ? `"${String(x).replace(/"/g, '""')}"` : x).join(",");
   const patchName = bytes => String.fromCharCode(...bytes.subarray(9, 25)).replace(/[^\x20-\x7E]/g, "").trim();
 
@@ -919,7 +914,7 @@
       await openInput();
       for (let i = 0; i < files.length && !S.recordAbort; i++) {
         const file = files[i], bytes = new Uint8Array(await file.arrayBuffer()), base = file.name.replace(/\.syx$/i, "");
-        if (!isPatchFile(bytes)) { rows.push(csvRow([file.name, "", "", "", "", "", "", "", "", "", "", ""])); continue; }
+        if (!isPatchFile(bytes)) { rows.push(csvRow([file.name, "", "", "", "", "", "", "", "", "", "", "", ""])); continue; }
         status(T("status_batch", { i: i + 1, n: files.length, name: base }));
         const send = Uint8Array.from(bytes); send[6] = 0x00; send[7] = synth; send[8] = 0x00;
         output.send(send);
@@ -928,7 +923,7 @@
         const rec = await recordPhrase(octave);
         const a = analyse(rec);
         out.push({ name: base + ".wav", data: encodeWav(rec) });
-        rows.push(csvRow([file.name, patchName(bytes), octave, a.max_db, a.peak_db, a.rms_db, a.clipped, a.silent, a.lr_corr, a.centroid_hz, rec.sampleRate, rec.deviceChannels]));
+        rows.push(csvRow([file.name, patchName(bytes), octave, a.max_db, a.dev_db, a.peak_db, a.rms_db, a.clipped, a.silent, a.lr_corr, a.centroid_hz, rec.sampleRate, rec.deviceChannels]));
         await waitForSilence(output);
       }
       out.push({ name: "analysis.csv", data: new TextEncoder().encode(rows.join("\n") + "\n") });

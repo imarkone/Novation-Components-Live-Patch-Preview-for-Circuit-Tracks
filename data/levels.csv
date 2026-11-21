@@ -1,5 +1,7 @@
 key,value
-quiet_db,-45
-loud_db,-3
+target_db,-21
+tolerance_db,7
+silent_db,-40
+peak_db,-1
 retries,3
 tail_db,-60
