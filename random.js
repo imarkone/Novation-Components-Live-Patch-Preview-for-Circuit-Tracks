@@ -495,7 +495,13 @@
   async function levelCheck(kind, attempt) {
     const L = S.data.levels;
     let rec;
-    try { rec = await recordPhrase(S.octave); } catch (e) { status(audioError(e)); return false; }
+    try { rec = await recordPhrase(S.octave); }
+    catch (e) {
+      // No usable input: still play the phrase so the sound can be heard.
+      status(audioError(e));
+      if (!S.timers.length) await playPhrase(S.octave).catch(() => {});
+      return false;
+    }
     const a = analyse(rec);
     if (a.max_db < L.quiet_db) {
       if (kind === "random" && attempt < L.retries) { status(T("status_retry", { max: a.max_db, i: attempt + 1, n: L.retries })); return true; }
