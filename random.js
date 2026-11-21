@@ -363,8 +363,8 @@
     // Wild step: single random extreme values (not for pitch range, loudness and voice behaviour).
     for (const p of PARAMS) {
       if (locks[p.group] || p.group === "matrix" || NO_WILD.test(p.key) || cur[p.key] === undefined || rnd() > cfg.wild * k * 0.14) continue;
-      const m = meta[p.key];
-      if (p.kind === "slider") next[p.key] = Math.round(m.min + rnd() * (m.max - m.min));
+      const m = meta[p.key], top = p.key === "dist.level" ? Math.min(m.max, 70) : m.max;
+      if (p.kind === "slider") next[p.key] = Math.round(m.min + rnd() * (top - m.min));
       else if (p.kind === "check") next[p.key] = rnd() < 0.5;
       else if (m.options) next[p.key] = pickOne(m.options);
     }
