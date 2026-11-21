@@ -45,7 +45,7 @@
     const types = {};
     for (const r of parseCsv(files.recipes)) types[r.type] = { jitter: +r.jitter, wild: +r.wild, phrase: r.phrase };
     // data/levels.csv: thresholds for the audio level check (dBFS at the user's interface gain).
-    const levels = { target_db: -21, tolerance_db: 7, silent_db: -40, peak_db: -1, retries: 3, tail_db: -60 };
+    const levels = { target_db: -21, tolerance_db: 7, silent_db: -40, peak_db: -1, retries: 3, corrections: 2, tail_db: -60 };
     for (const r of parseCsv(files.levels || "key,value\n")) if (r.key in levels) levels[r.key] = +r.value;
     const corpus = parseCsv(files.corpus).map(r => Object.fromEntries(Object.entries(r).map(([k, v]) => [k, v !== "" && k !== "mx" && !isNaN(+v) ? +v : v])));
     const phrases = {};
@@ -80,6 +80,8 @@
   add("mix.osc2", "slider", "MAIN", "MIXER", "mixer", { label: "OSC 2 Level" });
   add("mix.noise", "slider", "MAIN", "MIXER", "mixer", { label: "Noise Level" });
   add("mix.ring", "slider", "MAIN", "MIXER", "mixer", { label: "Ringmod Level" });
+  add("mix.pre", "slider", "MAIN", "MIXER", "mixer", { label: "Pre FX Level" });
+  add("mix.post", "slider", "MAIN", "MIXER", "mixer", { label: "Post FX Level" });
   add("flt.type", "select", "MAIN", "FILTER", "filter", { idx: 0 });
   add("flt.route", "radio", "MAIN", "FILTER", "filter", { name: "filter-routing" });
   add("flt.freq", "slider", "MAIN", "FILTER", "filter", { label: "Frequency" });
@@ -474,8 +476,10 @@
 
   // Plays the phrase while recording the audio interface input and measures it (loudest 50 ms = max_db).
   // Silent (below levels.csv silent_db) -> returns true, the caller generates again (up to "retries").
-  // Outside target_db +- tolerance_db (factory patches recorded at the user's gain) -> mixer levels are scaled to the target
-  // and the phrase is recorded once more to report the result. Peak is kept below peak_db.
+  // Outside target_db +- tolerance_db (factory patches recorded at the user's gain) -> the level is corrected, up to
+  // "corrections" times, each followed by a new measurement. The correction uses Post FX Level first: it is the last gain
+  // stage, in dB, after drive, distortion and EQ (lowering the mixer did not help when drive or EQ boosts saturated the
+  // signal, test batch 2026-11). The mixer is scaled only for what Post FX (-12..+18 dB) cannot cover. Peak stays below peak_db.
   const MIX_KEYS = ["mix.osc1", "mix.osc2", "mix.ring", "mix.noise"];
   async function levelCheck(kind, attempt) {
     const L = S.data.levels;
@@ -491,26 +495,32 @@
       if (kind === "random" && attempt < L.retries) { status(T("status_retry", { max: a.max_db, i: attempt + 1, n: L.retries })); return true; }
       status(T("status_quiet", { max: a.max_db })); return false;
     }
-    let gainDb = 0;
-    if (Math.abs(a.max_db - L.target_db) > L.tolerance_db) gainDb = L.target_db - a.max_db;
-    gainDb = Math.min(gainDb, L.peak_db - a.peak_db);
-    if (gainDb === 0 || S.ui.locks.mixer || !S.last) { status(T("status_level_ok", { max: a.max_db, peak: a.peak_db })); return false; }
-    const now = MIX_KEYS.filter(key => S.last.values[key] !== undefined);
-    const loudest = Math.max(1, ...now.map(key => S.last.values[key]));
-    let factor = Math.pow(10, gainDb / 20);
-    if (loudest * factor > 127) factor = 127 / loudest;
-    if (Math.abs(factor - 1) < 0.05) { status(T("status_level_limit", { max: a.max_db })); return false; }
-    const values = {};
-    for (const key of now) values[key] = Math.round(clamp(S.last.values[key] * factor, 0, 127));
-    await applyState(values);
-    Object.assign(S.last.values, values);
-    if (S.history[0]) S.history[0].values = { ...S.last.values };
-    save();
-    await sleep(200);
-    try {
-      const b = analyse(await recordPhrase(S.octave));
-      status(T("status_level_fixed", { from: a.max_db, to: b.max_db, target: L.target_db }));
-    } catch (e) { status(audioError(e)); }
+    const first = a.max_db;
+    for (let pass = 0; pass < L.corrections; pass++) {
+      let gainDb = Math.abs(a.max_db - L.target_db) > L.tolerance_db || pass > 0 ? L.target_db - a.max_db : 0;
+      gainDb = Math.min(gainDb, L.peak_db - a.peak_db);
+      if (Math.abs(gainDb) < 1.5 || S.ui.locks.mixer || !S.last) break;
+      const values = {}, post = S.last.values["mix.post"] ?? 0;
+      const newPost = clamp(Math.round(post + gainDb), -12, 18);
+      if (newPost !== post) values["mix.post"] = newPost;
+      const rest = gainDb - (newPost - post);
+      if (Math.abs(rest) >= 1.5) {
+        const keys = MIX_KEYS.filter(key => S.last.values[key] !== undefined);
+        const loudest = Math.max(1, ...keys.map(key => S.last.values[key]));
+        let factor = Math.pow(10, rest / 20);
+        if (loudest * factor > 127) factor = 127 / loudest;
+        for (const key of keys) values[key] = Math.round(clamp(S.last.values[key] * factor, 0, 127));
+      }
+      if (!Object.keys(values).length) { status(T("status_level_limit", { max: a.max_db })); return false; }
+      await applyState(values);
+      Object.assign(S.last.values, values);
+      if (S.history[0]) S.history[0].values = { ...S.last.values };
+      save();
+      await sleep(200);
+      try { a = analyse(await recordPhrase(S.octave)); } catch (e) { status(audioError(e)); return false; }
+      if (Math.abs(a.max_db - L.target_db) <= 2) break;
+    }
+    status(first === a.max_db ? T("status_level_ok", { max: a.max_db, peak: a.peak_db }) : T("status_level_fixed", { from: first, to: a.max_db, target: L.target_db }));
     return false;
   }
 
@@ -653,7 +663,7 @@
       download(base + ".syx", "application/octet-stream", bytes);
       if (S.ui.debug) {
         const editor = await readAll();
-        const report = { tool: "ct-random 0.7.5", name: label, kind: info.kind, type: info.type, intensity: info.intensity, locks: info.locks, seed: info.seed,
+        const report = { tool: "ct-random 0.7.6", name: label, kind: info.kind, type: info.type, intensity: info.intensity, locks: info.locks, seed: info.seed,
           synth: S.ui.channel, donors: info.donors, generated: info.values, editorAtExport: editor.cur, patchBytes: Array.from(bytes) };
         download(base + ".json", "application/json", JSON.stringify(report, null, 1));
       }
@@ -675,7 +685,7 @@
       v[o + "wave"] = idx(d[b]); v[o + "interp"] = d[b + 1]; v[o + "index"] = d[b + 2] - 64; v[o + "vsync"] = d[b + 3];
       v[o + "density"] = d[b + 4]; v[o + "dtune"] = d[b + 5]; v[o + "semi"] = d[b + 6] - 64; v[o + "cents"] = d[b + 7] - 64;
     });
-    v["mix.osc1"] = d[54]; v["mix.osc2"] = d[55]; v["mix.ring"] = d[56]; v["mix.noise"] = d[57];
+    v["mix.osc1"] = d[54]; v["mix.osc2"] = d[55]; v["mix.ring"] = d[56]; v["mix.noise"] = d[57]; v["mix.pre"] = d[58] - 64; v["mix.post"] = d[59] - 64;
     v["flt.route"] = idx(Math.min(d[60], 2)); v["flt.drive"] = d[61]; v["flt.drivetype"] = idx(d[62]); v["flt.type"] = idx(d[63]);
     v["flt.freq"] = d[64]; v["flt.key"] = d[65]; v["flt.res"] = d[66]; v["flt.q"] = d[67]; v["flt.env2"] = d[68] - 64;
     [69, 74, 79].forEach((b, i) => {

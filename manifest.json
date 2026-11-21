@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Circuit Tracks Patch Preview and Random Sound Generator",
-  "version": "0.7.5",
+  "version": "0.7.6",
   "description": "Circuit Tracks: audition patches, generate random sounds, open/save .syx and record WAV in Novation Components.",
   "content_scripts": [
     {
