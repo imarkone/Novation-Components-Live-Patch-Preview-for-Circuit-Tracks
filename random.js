@@ -467,6 +467,7 @@
   // attempt > 0: automatic retry after the level check found silence; it replaces the previous try in history and undo.
   async function run(kind, attempt = 0) {
     if (S.busy) { status(T("status_busy")); return; }
+    if (kind === "cross" && parents().length < 2) { status(T("status_cross_need")); return; }
     S.busy = true; setBusy(true);
     let retry = false;
     try {
@@ -479,7 +480,7 @@
       let next;
       if (kind === "cross") {
         const [A, B] = parents();
-        if (!A || !B) throw new Error(T("status_cross_need"));
+        if (!A || !B) throw Object.assign(new Error(T("status_cross_need")), { plain: true });
         next = planCross(cur, meta, k, locks, A, B);
       } else next = { ...(kind === "random" ? planRandom : planMutate)(cur, meta, type, k, locks), ...planMatrix(kind, cur, meta, type, k, locks) };
       applyGuards(cur, next, locks);
@@ -498,7 +499,7 @@
         if (S.ui.levelCheck) retry = await levelCheck(kind, attempt);
         else await playPhrase(S.octave).catch(e => status(errorText(e)));
       }
-    } catch (e) { status(T("status_error", { msg: e.message })); }
+    } catch (e) { status(e.plain ? e.message : T("status_error", { msg: e.message })); }
     finally { rng = Math.random; S.busy = false; setBusy(false); }
     if (retry) await run(kind, attempt + 1);
   }
@@ -1193,6 +1194,7 @@
     ui.recTitle.textContent = T("rec_title"); ui.inputLabel.textContent = T("input_label");
     ui.bInputs.textContent = T("btn_inputs"); ui.bInputs.title = T("tip_inputs");
     if (!ui.input.options.length) ui.input.append(el("option", { value: S.ui.inputId || "", textContent: T("input_default") }));
+    else if (ui.input.options[0].value === "") ui.input.options[0].textContent = T("input_default");
     ui.check.checked = !!S.ui.levelCheck; ui.checkLabel.textContent = T("level_check"); ui.checkLabel.title = T("tip_level_check");
     ui.bRec.textContent = T("btn_rec"); ui.bRec.title = T("tip_rec");
     ui.bBatch.textContent = T("btn_batch"); ui.bBatch.title = T("tip_batch");
