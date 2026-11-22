@@ -5,10 +5,14 @@ A free, independent Chrome and Edge extension for the **Novation Circuit Tracks*
 - **Patch preview** – play the selected patch from a pack on your Circuit Tracks before you load it.
 - **Random / Mutate** – generate new synth sounds directly in the Components synth editor. The knobs move, so you can see and fine-tune what was generated.
 - **Open .syx / Save .syx** – load a patch file into the editor with one click, and save the current sound from the Circuit Tracks as `.syx` (plus an optional debug JSON).
+- **Cross ★** – breed a new sound from two starred sounds in the history.
+- **Snapshot A/B** – store a sound and switch between it and your edits.
 - **Play / Loop** – play a short phrase of the current sound, or repeat it every 1–9 seconds while you turn knobs.
 - **WAV recording** – record the Circuit Tracks output through an audio interface, one sound or a whole batch of `.syx` files, with a level and brightness analysis (`analysis.csv`).
 
 ![Three audition buttons below Category in an example patch panel](docs/patch-panel.png)
+
+Slovak user guide: [docs/PRIRUCKA.md](docs/PRIRUCKA.md).
 
 ## Install
 
@@ -39,6 +43,9 @@ Open **Circuit Tracks → Synth** and open or create a patch. A panel appears at
 - **Mutate** – small changes to the current sound; its character stays.
 - **Group locks** – checked groups are not changed.
 - **Undo** and a **history** of the last 20 sounds (starred ones are kept).
+- **Cross** – choose two starred sounds as parents A and B: knobs land between them, switches, pitch steps and the matrix come from one parent; intensity adds randomness.
+- **Snapshot / A/B** – Snapshot stores the current sound, A/B swaps the editor between it and the current sound.
+- The panel title shows the version read from the loaded `manifest.json`, so you can see whether a reload picked up a new version.
 - A few safety rules (minimum mixer level, no endless release, oscillator semitones within ±24, no matrix routing that silences a source). Each rule changes at most a handful of the real patches in the corpus; loudness itself is handled by the level check.
 
 Components sends every change to the Circuit Tracks synth track that is selected in Components. Use MIDI channel 1 for Synth 1 and 2 for Synth 2. **Keyboard Octave** applies to the Circuit Tracks pads, not to incoming MIDI notes, so the extension shifts its phrases by that value.
@@ -57,9 +64,9 @@ The Circuit Tracks sends no audio over USB. Connect its line outputs to an audio
 2. **● WAV** records the current sound (phrase + 1.5 s tail).
 3. **● Batch .syx → WAV** – choose several `.syx` files. Each is sent to the Circuit Tracks, played and recorded. You get one ZIP with a WAV per file and `analysis.csv` (peak, RMS, clipped samples, silence, L/R correlation, spectral centroid). The original patch is restored at the end.
 
-Browser echo cancellation, noise suppression and auto gain are switched off so levels stay comparable. Keep the interface gain fixed for all recordings. Between batch files the extension sends All Notes Off and waits until the input is quiet, so a long release does not leak into the next recording.
+Recording uses an AudioWorklet. Browser echo cancellation, noise suppression and auto gain are switched off so levels stay comparable. Keep the interface gain fixed for all recordings. Between batch files the extension sends All Notes Off and waits until the input is quiet, so a long release does not leak into the next recording.
 
-**Level check and levelling after Random** (needs a selected input): the phrase played after Random is recorded and measured (loudest 50 ms). A silent sound is replaced by a new Random (up to 3 times). A sound outside the target range is brought to the target with **Post FX Level** (the last gain stage, in dB, after drive, distortion and EQ), and with the mixer only for what Post FX cannot cover; it is measured again after each correction (up to 2). The target comes from recorded factory patches: they peaked between −30 and −12 dBFS at the author's interface gain, typically −21. Change `data/levels.csv` if your gain differs.
+**Level check and levelling after Random** (needs a selected input): the phrase played after Random is recorded and measured (loudest 50 ms). A silent sound is replaced by a new Random or Cross (up to 3 times). A sound outside the target range (−21 ±4 dBFS) is brought to the target with **Post FX Level** (the last gain stage, in dB, after drive, distortion and EQ), and with the mixer only for what Post FX cannot cover; it is measured again after each correction (up to 2). The target comes from recorded factory patches: they peaked between −30 and −12 dBFS at the author's interface gain, typically −21. Change `data/levels.csv` if your gain differs.
 
 ## Files
 
