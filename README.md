@@ -7,7 +7,7 @@ A free, independent Chrome and Edge extension for the **Novation Circuit Tracks*
 - **Open .syx / Save .syx** – load a patch file into the editor with one click, and save the current sound from the Circuit Tracks as `.syx` (plus an optional debug JSON).
 - **Cross ★** – breed a new sound from two starred sounds in the history.
 - **Snapshot A/B** – store a sound and switch between it and your edits.
-- **Play / Loop** – play a short phrase of the current sound, or repeat it every 1–9 seconds while you turn knobs.
+- **Play / Loop** – play a short phrase of the current sound, or repeat it with a 0–9 second pause (0 = continuous) while you turn knobs.
 - **WAV recording** – record the Circuit Tracks output through an audio interface, one sound or a whole batch of `.syx` files, with a level and brightness analysis (`analysis.csv`).
 
 ![Three audition buttons below Category in an example patch panel](docs/patch-panel.png)
@@ -37,12 +37,12 @@ The extension reads the active Synth 1 patch, loads the selected sound into temp
 
 Open **Circuit Tracks → Synth** and open or create a patch. A panel appears at the top right.
 
-- **Sound type** – Any, Bass, Lead, Pad, Pluck, Keys, FX.
+- **Sound type** – Any, Bass, Lead, Pad, Pluck, Keys, Bell, String, Arp, Movement, FX. Donors are filtered by the category stored in each patch (`data/recipes.csv`, column `categories`).
 - **Random** – builds a new sound from sections of real patches (`data/corpus.csv`, 542 audible patches decoded from the Novation packs and the YBC Big City / Delorean Dream packs for the original Circuit, which use the same patch layout): oscillators + mixer + voice from one patch, filter, envelopes, LFOs, effects and the modulation matrix from others. Every unlocked section is replaced.
 - **Intensity** – wildness. 0 = clean sections of real patches; 100 = random variation, extreme chorus/phaser and distortion values and extra modulation-matrix routings.
 - **Mutate** – small changes to the current sound; its character stays.
 - **Group locks** – checked groups are not changed.
-- **Undo** and a **history** of the last 20 sounds (starred ones are kept).
+- **Undo** and a **history** of the last 20 sounds (starred ones are kept). Entries show their origin, e.g. the name of an opened `.syx` or both parents of a cross.
 - **Cross** – choose two starred sounds as parents A and B: knobs land between them, switches, pitch steps and the matrix come from one parent; intensity adds randomness.
 - **Snapshot / A/B** – Snapshot stores the current sound, A/B swaps the editor between it and the current sound.
 - The panel title shows the version read from the loaded `manifest.json`, so you can see whether a reload picked up a new version.
@@ -52,7 +52,8 @@ Components sends every change to the Circuit Tracks synth track that is selected
 
 ### Open and save `.syx`
 
-- **Open .syx** loads a patch file into the editor knobs (everything except macros and the patch name).
+- **Open .syx** loads one or more patch files. The first goes into the editor knobs (everything except macros and the patch name); all of them are added to the history, where Mutate and Cross work on them.
+- **Set CT project delay/reverb on open** (on by default) – patches made by [mininova-to-circuit-tracks](https://github.com/imarkone/mininova-to-circuit-tracks) store the original delay and reverb settings in the reserved bytes 18–31. On open, the panel sends them to the Circuit Tracks project FX via MIDI channel 16 (NRPN) and sets the reverb/delay send of the selected synth. Factory patches have no such data, so nothing is sent.
 - **Save .syx** reads the current sound from the Circuit Tracks (SysEx dump of Synth 1 or 2) and downloads it as `Rnd <type> <intensity> #<number>.syx`. Upload it in Components via **Packs** as usual.
 - **JSON (debug)** also saves the generator settings, seed, donor patches and all values.
 

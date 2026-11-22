@@ -561,7 +561,7 @@
 
   // Starred history entries that can be parents; A and B are chosen in the panel (by history id).
   const starred = () => S.history.filter(h => h.star);
-  const shortName = s => String(s || "").replace(/\.syx$/i, "").replace(/^[ABC]_/, "").replace(/_[0-9a-f]{4}$/i, "").replace(/_/g, " ").trim().slice(0, 12);
+  const shortName = s => String(s || "").replace(/\.syx$/i, "").replace(/^[ABC]_/, "").replace(/_[0-9a-f]{4}$/i, "").replace(/_/g, " ").trim().slice(0, 16);
   const entryLabel = h => `${T("kind_" + h.kind)} · ${h.origin ? h.origin : T("type_" + h.type)} · ${new Date(h.id).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}`;
   function parents() {
     const list = starred();

@@ -1,6 +1,6 @@
 # Príručka – Circuit Tracks Patch Preview a generátor náhodných zvukov
 
-Verzia rozšírenia 0.8.0
+Verzia rozšírenia 0.8.2
 
 ## Čo rozšírenie robí
 
@@ -30,7 +30,7 @@ Pri každej novej verzii nahraď celý priečinok rozšírenia a skontroluj čí
 2. Otvor `chrome://extensions` (v Edge `edge://extensions`) a zapni **Developer mode**.
 3. Prvý raz: **Load unpacked** a vyber ten priečinok. Pri aktualizácii nahraď obsah priečinka novým a pri rozšírení klikni na **Reload** (šípka v kruhu).
 4. Obnov stránku Components (F5). Pri prvom spustení povoľ MIDI a SysEx.
-5. Otvor **Circuit Tracks → Synth** a otvor alebo vytvor patch. Vpravo hore sa zobrazí panel **Náhodný zvuk v0.8.0**.
+5. Otvor **Circuit Tracks → Synth** a otvor alebo vytvor patch. Vpravo hore sa zobrazí panel **Náhodný zvuk v0.8.2**.
 
 **Kontrola verzie:** číslo za názvom panela sa číta z `manifest.json`, ktorý Chrome naozaj načítal. Ak po Reloade vidíš staré číslo, nová verzia sa nenačítala: skontroluj priečinok a daj Reload znova.
 
@@ -54,14 +54,14 @@ Panel je v editore vpravo hore. **Zbaliť** ho skryje, **EN/SK** prepne jazyk.
 
 | Ovládanie | Čo robí |
 | --- | --- |
-| Typ zvuku | Ľubovoľný, Bass, Lead, Pad, Pluck, Keys, FX. Random berie časti len z patchov toho typu, Ľubovoľný zo všetkých. |
+| Typ zvuku | Ľubovoľný, Bass, Lead, Pad, Pluck, Keys, Bell, String, Arp, Movement, FX. Random berie časti len z patchov tej kategórie (podľa kategórie uloženej v patchi: Bell = zvony, String = sláčiky, Arp = arpeggio, Movement = pohyblivé zvuky), Ľubovoľný zo všetkých. Bell a Movement majú menej donorov (asi 20), preto sa zvuky viac podobajú. |
 | Intenzita | Divokosť. 0 = čisté časti skutočných patchov, 100 = náhodné odchýlky, extrémny chorus/phaser a distortion, extra modulácie v matici. Pri Mutuj veľkosť zmeny. |
 | Random | Nový zvuk: oscilátory + mixer + voice z jedného skutočného patchu, filter, obálky, LFO, efekty a matica z iných. Mení všetky odomknuté skupiny. |
 | Mutuj | Jemne posunie aktuálny zvuk, charakter zostane. |
 | Späť | Vráti zvuk pred posledným Random, Mutuj, Krížením alebo Otvoriť .syx. |
 | Stop | Zastaví prehrávanie, Loop aj dávku. |
 | Zámky skupín | Zaškrtnutá skupina sa nemení (napr. zamkni Filter a hľadaj len nové oscilátory). |
-| História | Posledných 20 zvukov. Klik vráti zvuk do editora, ★ ho označí ako obľúbený a ponechá ho natrvalo. |
+| História | Posledných 20 zvukov. Klik vráti zvuk do editora, ★ ho označí ako obľúbený a ponechá ho natrvalo. Pri zvuku je jeho pôvod: „Otvorené · Názov“ pre otvorený .syx, „Mutuj · Názov“ pre mutáciu otvoreného zvuku, „Kríženie · A×B“ pre potomka. |
 
 **Odkiaľ berie Random zvuky:** z 542 skutočných patchov (Novation packy, YBC Big City a Delorean Dream) v súbore `data/corpus.csv`. Vyššia intenzita pridá náhodu navyše.
 
@@ -94,7 +94,7 @@ Panel prehrá krátky úryvok na CT cez MIDI, aby si zvuk počul bez klaviatúry
 | --- | --- |
 | Po zmene zahrať úryvok | Po Random, Mutuj, Kríženie, A/B alebo kliknutí v histórii sa úryvok zahrá sám. |
 | ▶ Play | Zahrá úryvok aktuálneho zvuku (napr. po ručnej úprave gombíka). |
-| ⟳ Loop + posuvník | Opakuje úryvok s pauzou 1 až 9 s, aby si mohol krútiť gombíkmi a počúvať bez klikania. Zastaví ho ďalšie kliknutie alebo Stop. |
+| ⟳ Loop + posuvník | Opakuje úryvok s pauzou 0 až 9 s (0 = hrá bez prestávky), aby si mohol krútiť gombíkmi a počúvať bez klikania. Zastaví ho ďalšie kliknutie alebo Stop. |
 | Úryvok | Podľa typu (bas, lead, pluck = Melódia; pad, keys = Akordy; FX = Jedna nota), alebo pevne Melódia, Akordy, Jedna nota. |
 | MIDI kanál | 1 = Synth 1, 2 = Synth 2 (podľa nastavenia CT). Musí sedieť so synthom, ktorý máš vybraný v Components. |
 
@@ -103,6 +103,17 @@ Panel prehrá krátky úryvok na CT cez MIDI, aby si zvuk počul bez klaviatúry
 ## Otvoriť a uložiť .syx
 
 **Otvoriť .syx** načíta patch zo súboru priamo do gombíkov editora a Components ho hneď pošle do CT. Nemusíš cez Synth → Upload. Načítajú sa všetky gombíky okrem makier a názvu patchu.
+
+- Naraz môžeš vybrať viac súborov. Prvý sa načíta do editora, všetky sa pridajú do histórie ako „Otvorené · Názov“ a prepínaš medzi nimi klikom v histórii.
+- Na otvorený zvuk funguje Mutuj, ★ aj Kríženie. Názov pôvodu sa prenesie ďalej, aj do názvu pri Uložiť .syx (napr. `Mut FilterBass #03`).
+
+**Pri otvorení nastaviť delay/reverb projektu CT** (zaškrtnuté predvolene): patche z prevodníka MiniNova/UltraNova → CT majú v nevyužitých bajtoch uložené nastavenie delay a reverbu z originálu. CT má delay a reverb spoločný pre celý projekt, nie v patchi, preto ich panel po otvorení pošle do CT cez MIDI kanál 16 (typ, decay, damping reverbu; čas, sync, feedback, šírku delay) a nastaví send pre Synth 1 alebo 2 podľa MIDI kanála. Zmení sa tým nastavenie celého projektu, nielen tohto zvuku. Bežné Novation patche tieto údaje nemajú a nič sa nepošle.
+
+- MIDI kanál 16 musí byť na CT nastavený ako projektový kanál (výrobné nastavenie).
+- Údaje fungujú len pri otvorení cez panel. Ak patch nahráš cez Packs, Components ich pravdepodobne nezachová.
+- Makro 1 (mod wheel z originálu) sa pri Otvoriť .syx nenačíta, lebo panel makrá nemení. Ak ho chceš, nahraj patch cez Packs.
+
+**Prevodník MiniNova/UltraNova → CT** je samostatný projekt: [github.com/imarkone/mininova-to-circuit-tracks](https://github.com/imarkone/mininova-to-circuit-tracks). Stránku `web/index.html` otvoríš v prehliadači aj bez internetu, pretiahneš do nej .syx z MiniNova a stiahneš ZIP s CT patchmi a `report.csv` (známka A/B/C podľa toho, čo sa pri prevode stratilo).
 
 **Uložiť .syx** prečíta aktuálny zvuk priamo z CT (SysEx dump Synth 1 alebo 2 podľa MIDI kanála) a stiahne ho ako súbor:
 
