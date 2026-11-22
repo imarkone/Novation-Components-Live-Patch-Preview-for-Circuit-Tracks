@@ -43,7 +43,7 @@
     const lang = {};
     for (const r of parseCsv(files.lang)) lang[r.key] = r;
     const types = {};
-    for (const r of parseCsv(files.recipes)) types[r.type] = { jitter: +r.jitter, wild: +r.wild, phrase: r.phrase };
+    for (const r of parseCsv(files.recipes)) types[r.type] = { jitter: +r.jitter, wild: +r.wild, phrase: r.phrase, cats: String(r.categories || "").split(";").filter(Boolean).map(Number) };
     // data/levels.csv: thresholds for the audio level check (dBFS at the user's interface gain).
     const levels = { target_db: -21, tolerance_db: 7, silent_db: -40, peak_db: -1, retries: 3, corrections: 2, tail_db: -60 };
     for (const r of parseCsv(files.levels || "key,value\n")) if (r.key in levels) levels[r.key] = +r.value;
@@ -320,7 +320,9 @@
   const pickOne = list => list[Math.floor(rnd() * list.length)];
   const typeCfg = type => S.data.types[type] || S.data.types.any;
   const donors = type => {
-    const list = type === "any" ? S.data.corpus : S.data.corpus.filter(r => r.type === type);
+    // Donor patches by patch category (recipes.csv "categories"; corpus "cat" = Novation category 1-14).
+    const cats = typeCfg(type).cats || [];
+    const list = !cats.length ? S.data.corpus : S.data.corpus.filter(r => cats.includes(+r.cat));
     return list.length ? list : S.data.corpus;
   };
   const SECTIONS = [["osc", "mixer", "voice"], ["filter"], ["env"], ["lfo"], ["chorus"], ["eq"], ["dist"]];
@@ -491,8 +493,11 @@
       S.octave = merged["voice.octave"] ?? 0;
       rng = Math.random;
       const donorList = kind === "random" || kind === "cross" ? lastInfo.donors.slice() : [];
-      S.last = { kind, type, intensity: S.ui.intensity, locks: { ...locks }, seed, donors: donorList, values: merged };
-      S.history.unshift({ id: Date.now(), kind, type, values: merged, star: false, seed, intensity: S.ui.intensity, donors: donorList });
+      // Origin: the named sound this one comes from (an opened .syx and its mutations / crosses); a Random starts fresh.
+      if (kind === "random") S.origin = "";
+      if (kind === "cross") { const [A, B] = parents(); S.origin = shortName(A.origin || A.label) + "×" + shortName(B.origin || B.label); }
+      S.last = { kind, type, intensity: S.ui.intensity, locks: { ...locks }, seed, donors: donorList, values: merged, origin: S.origin || "" };
+      S.history.unshift({ id: Date.now(), kind, type, values: merged, star: false, seed, intensity: S.ui.intensity, donors: donorList, origin: S.origin || "" });
       trimHistory(); save(); renderHistory();
       status(T("status_done", { n: changed }));
       if (S.ui.autoplay && !S.looping) {
@@ -556,7 +561,8 @@
 
   // Starred history entries that can be parents; A and B are chosen in the panel (by history id).
   const starred = () => S.history.filter(h => h.star);
-  const entryLabel = h => `${T("kind_" + h.kind)} · ${T("type_" + h.type)} · ${new Date(h.id).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}`;
+  const shortName = s => String(s || "").replace(/\.syx$/i, "").replace(/^[ABC]_/, "").replace(/_[0-9a-f]{4}$/i, "").replace(/_/g, " ").trim().slice(0, 12);
+  const entryLabel = h => `${T("kind_" + h.kind)} · ${h.origin ? h.origin : T("type_" + h.type)} · ${new Date(h.id).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}`;
   function parents() {
     const list = starred();
     const find = id => list.find(h => h.id === +id);
@@ -601,7 +607,11 @@
     try {
       const changed = await applyState(entry.values);
       if (entry.values["voice.octave"] !== undefined) S.octave = entry.values["voice.octave"];
-      if (!isUndo && entry.kind) S.last = { kind: entry.kind, type: entry.type, intensity: entry.intensity ?? 0, locks: {}, seed: entry.seed ?? 0, donors: entry.donors || [], values: entry.values };
+      if (!isUndo && entry.kind) {
+        S.origin = entry.origin || "";
+        S.last = { kind: entry.kind, type: entry.type, intensity: entry.intensity ?? 0, locks: {}, seed: entry.seed ?? 0, donors: entry.donors || [], values: entry.values, origin: S.origin };
+        if (entry.fx) applyProjectFx(entry.fx);
+      }
       status(isUndo ? T("status_undo_done") : T("status_done", { n: changed }));
       if (!isUndo && S.ui.autoplay && !S.looping) await playPhrase(S.octave ?? 0).catch(e => status(errorText(e)));
     } catch (e) { status(T("status_error", { msg: e.message })); }
@@ -671,7 +681,7 @@
       while (S.looping) {
         await playPhrase(S.octave ?? 0);
         if (!S.looping) break;
-        status(T("status_loop_wait", { s: S.ui.loopPause }));
+        if (S.ui.loopPause > 0) status(T("status_loop_wait", { s: S.ui.loopPause }));
         const end = Date.now() + S.ui.loopPause * 1000;
         while (S.looping && Date.now() < end) await sleep(100);
       }
@@ -721,7 +731,9 @@
       const bytes = await readCurrentPatch(S.ui.channel - 1);
       const info = S.last || { kind: "random", type: S.ui.type, intensity: S.ui.intensity, locks: {}, seed: 0, donors: [], values: {} };
       S.ui.counter = (S.ui.counter || 0) + 1; save();
-      const label = `${info.kind === "mutate" ? "Mut" : "Rnd"} ${info.type} ${info.intensity} #${String(S.ui.counter).padStart(2, "0")}`.slice(0, 16);
+      const prefix = { mutate: "Mut", cross: "X", open: "Op" }[info.kind] || "Rnd";
+      const tail = ` #${String(S.ui.counter).padStart(2, "0")}`;
+      const label = info.origin ? `${prefix} ${info.origin}`.slice(0, 16 - tail.length) + tail : `${prefix} ${info.type} ${info.intensity}${tail}`.slice(0, 16);
       bytes[7] = 0x00; // same location byte as a patch downloaded from Components
       for (let i = 0; i < 16; i++) bytes[9 + i] = i < label.length ? label.charCodeAt(i) : 0x20;
       const base = label.replace(/[^A-Za-z0-9#]+/g, "_");
@@ -783,22 +795,65 @@
     });
   }
 
-  async function openSyx() {
+  // Delay / reverb stored by the MiniNova converter (github.com/imarkone/mininova-to-circuit-tracks) in the reserved
+  // data bytes 18-31: 77, 1, reverb type, decay, damping, reverb send, delay time, sync, feedback, width, ratio, slew,
+  // delay send, checksum. Returns null for patches without it (all Novation patches have zeros there).
+  function readFxMeta(bytes) {
+    const d = bytes.subarray(9, 349);
+    if (d[18] !== 77 || d[19] !== 1) return null;
+    let sum = 0; for (let i = 18; i < 31; i++) sum += d[i];
+    if ((sum & 0x7F) !== d[31]) return null;
+    return { revType: d[20], revDecay: d[21], revDamp: d[22], revSend: d[23], dlyTime: d[24], dlySync: d[25], dlyFb: d[26],
+      dlyWidth: d[27], dlyRatio: d[28], dlySlew: d[29], dlySend: d[30] };
+  }
+
+  // Circuit Tracks project FX on MIDI channel 16: NRPN 1:x (CC 99 = 1, CC 98 = x, CC 6 = value),
+  // reverb send CC 88/89 and delay send CC 111/112 for Synth 1/2 (Programmer's Reference Guide V3).
+  async function applyProjectFx(fx) {
+    if (!S.ui.applyFx || !fx || (!fx.revSend && !fx.dlySend)) return;
+    const synth = S.ui.channel === 2 ? 1 : 0, ch = 0xB0 | 15;
+    try {
+      const out = await getOutput();
+      const nrpn = (lsb, v) => { out.send([ch, 99, 1]); out.send([ch, 98, lsb]); out.send([ch, 6, Math.max(0, Math.min(127, v))]); };
+      nrpn(18, fx.revType); nrpn(19, fx.revDecay); nrpn(20, fx.revDamp);
+      nrpn(6, fx.dlyTime); nrpn(7, fx.dlySync); nrpn(8, fx.dlyFb); nrpn(9, fx.dlyWidth); nrpn(10, fx.dlyRatio); nrpn(11, fx.dlySlew);
+      out.send([ch, synth ? 89 : 88, fx.revSend]);
+      out.send([ch, synth ? 112 : 111, fx.dlySend]);
+      S.fxNote = T("status_fx_applied", { rev: fx.revSend, dly: fx.dlySend });
+    } catch (e) { S.fxNote = errorText(e); }
+  }
+
+  const patchName = bytes => String.fromCharCode(...bytes.subarray(9, 25)).replace(/[^\x20-\x7E]/g, "").trim();
+
+  // Opens one or more .syx files: each becomes a history entry (named, can be starred and crossed); the first is loaded.
+  async function openSyx(given) {
     if (S.busy) { status(T("status_busy")); return; }
-    const [file] = await pickFiles(false);
-    if (!file) return;
-    const bytes = new Uint8Array(await file.arrayBuffer());
-    if (!isPatchFile(bytes)) { status(T("status_bad_syx", { name: file.name })); return; }
+    const files = Array.isArray(given) ? given : await pickFiles(true);
+    if (!files.length) return;
+    const entries = [];
+    for (const file of files) {
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      if (!isPatchFile(bytes)) { status(T("status_bad_syx", { name: file.name })); continue; }
+      const origin = shortName(patchName(bytes) || file.name);
+      entries.push({ id: Date.now() + entries.length, kind: "open", type: S.ui.type, values: decodePatch(bytes), star: false, seed: 0,
+        intensity: 0, donors: [{ sections: "all", name: file.name, pack: "" }], origin, fx: readFxMeta(bytes) });
+    }
+    if (!entries.length) return;
     S.busy = true; setBusy(true);
     try {
       const { cur } = await readAll();
       S.undo.push(cur); if (S.undo.length > HISTORY_MAX) S.undo.shift();
-      const values = decodePatch(bytes);
-      status(T("status_applying", { n: Object.keys(values).length }));
-      const changed = await applyState(values);
-      S.octave = values["voice.octave"];
-      S.last = { kind: "open", type: S.ui.type, intensity: 0, locks: {}, seed: 0, donors: [{ sections: "all", name: file.name, pack: "" }], values };
-      status(T("status_opened", { name: file.name, n: changed }));
+      const first = entries[0];
+      status(T("status_applying", { n: Object.keys(first.values).length }));
+      const changed = await applyState(first.values);
+      S.octave = first.values["voice.octave"];
+      S.origin = first.origin;
+      S.last = { kind: "open", type: S.ui.type, intensity: 0, locks: {}, seed: 0, donors: first.donors, values: first.values, origin: first.origin };
+      S.history.unshift(...entries);
+      trimHistory(); save(); renderHistory(); fillParents();
+      S.fxNote = "";
+      if (first.fx) await applyProjectFx(first.fx);
+      status(entries.length > 1 ? T("status_opened_many", { n: entries.length, name: first.origin }) : T("status_opened", { name: first.origin, n: changed }) + (S.fxNote ? " " + S.fxNote : ""));
       if (S.ui.autoplay && !S.looping) await playPhrase(S.octave).catch(e => status(errorText(e)));
     } catch (e) { status(T("status_error", { msg: e.message })); }
     finally { S.busy = false; setBusy(false); }
@@ -984,8 +1039,6 @@
 
   const ANALYSIS_COLUMNS = ["file", "patch_name", "octave", "max_db", "dev_db", "peak_db", "rms_db", "clipped", "silent", "lr_corr", "centroid_hz", "sample_rate", "device_channels"];
   const csvRow = values => values.map(x => /[",\n]/.test(String(x)) ? `"${String(x).replace(/"/g, '""')}"` : x).join(",");
-  const patchName = bytes => String.fromCharCode(...bytes.subarray(9, 25)).replace(/[^\x20-\x7E]/g, "").trim();
-
   // Record the sound currently in the editor / CT.
   async function recordCurrent() {
     if (S.busy) { status(T("status_busy")); return; }
@@ -1077,7 +1130,8 @@
     } catch { /* ignore a broken store */ }
     if (!S.ui.lang) S.ui.lang = /^sk|^cs/i.test(navigator.language || "") ? "sk" : "en";
     if (!S.ui.locks) S.ui.locks = {};
-    if (!S.ui.loopPause) S.ui.loopPause = 5;
+    if (S.ui.loopPause === undefined) S.ui.loopPause = 5;
+    if (S.ui.applyFx === undefined) S.ui.applyFx = true;
   }
 
   // ---------------------------------------------------------------- UI
@@ -1103,7 +1157,7 @@
     head.append(ui.title, el("span", {}, ui.langBtn, " ", ui.collapse));
     ui.body = el("div");
     ui.typeLabel = el("label"); ui.type = el("select", { onchange: () => { S.ui.type = ui.type.value; save(); } });
-    for (const t of ["any", "bass", "lead", "pad", "pluck", "keys", "fx"]) ui.type.append(el("option", { value: t }));
+    for (const t of ["any", "bass", "lead", "pad", "pluck", "keys", "bell", "string", "arp", "movement", "fx"]) ui.type.append(el("option", { value: t }));
     ui.intLabel = el("label"); ui.int = el("input", { type: "range", min: 0, max: 100, oninput: () => { S.ui.intensity = +ui.int.value; ui.intVal.textContent = ui.int.value; save(); } }); ui.intVal = el("span");
     ui.bRandom = el("button", { onclick: () => run("random") }); ui.bMutate = el("button", { onclick: () => run("mutate") });
     ui.bUndo = el("button", { onclick: () => undoLast() }); ui.bStop = el("button", { onclick: () => { stopLoop(); S.recordAbort = true; status(T("status_idle")); } });
@@ -1124,10 +1178,12 @@
     ui.bSave = el("button", { onclick: () => exportPatch() }); ui.bSave.style.cssText = btnStyle; ui.buttons.push(ui.bSave);
     ui.debug = el("input", { type: "checkbox", onchange: () => { S.ui.debug = ui.debug.checked; save(); } }); ui.debugLabel = el("label");
     ui.bOpen = el("button", { onclick: () => openSyx() }); ui.bOpen.style.cssText = btnStyle; ui.buttons.push(ui.bOpen);
+    ui.fxBox = el("input", { type: "checkbox", onchange: () => { S.ui.applyFx = ui.fxBox.checked; save(); } }); ui.fxLabel = el("label");
     const saveRow = el("div"); saveRow.style.cssText = "display:flex;gap:8px;align-items:center;margin:6px 0;flex-wrap:wrap;"; saveRow.append(ui.bOpen, ui.bSave, ui.debug, ui.debugLabel);
+    const fxRow = el("div"); fxRow.style.cssText = "display:flex;gap:6px;align-items:center;margin:2px 0 6px;"; fxRow.append(ui.fxBox, ui.fxLabel);
     ui.bPlay = el("button", { onclick: () => playNow() }); ui.bPlay.style.cssText = btnStyle;
     ui.bLoop = el("button", { onclick: () => toggleLoop() }); ui.bLoop.style.cssText = btnStyle;
-    ui.pause = el("input", { type: "range", min: 1, max: 9, step: 1, oninput: () => { S.ui.loopPause = +ui.pause.value; ui.pauseVal.textContent = ui.pause.value + " s"; save(); } });
+    ui.pause = el("input", { type: "range", min: 0, max: 9, step: 1, oninput: () => { S.ui.loopPause = +ui.pause.value; ui.pauseVal.textContent = ui.pause.value + " s"; save(); } });
     ui.pause.style.cssText = "width:80px;accent-color:#7796ff;"; ui.pauseVal = el("span");
     const playRow = el("div"); playRow.style.cssText = "display:flex;gap:6px;align-items:center;margin:4px 0;flex-wrap:wrap;"; playRow.append(ui.bPlay, ui.bLoop, ui.pause, ui.pauseVal);
     ui.recTitle = el("div"); ui.recTitle.style.cssText = "margin-top:8px;font-weight:bold;";
@@ -1155,7 +1211,7 @@
     ui.status = el("div"); ui.status.style.cssText = "margin:6px 0;min-height:16px;color:#9fb3ff;overflow-wrap:anywhere;";
     ui.histTitle = el("div"); ui.hist = el("div");
     const row = (label, ...controls) => { const r = el("div"); r.style.cssText = "margin:4px 0;display:flex;gap:6px;align-items:center;flex-wrap:wrap;"; r.append(label, ...controls); return r; };
-    ui.body.append(row(ui.typeLabel, ui.type), row(ui.intLabel, ui.int, ui.intVal), buttons, snapRow, saveRow, ui.crossTitle, crossBox, ui.bCross, ui.locksTitle, locks,
+    ui.body.append(row(ui.typeLabel, ui.type), row(ui.intLabel, ui.int, ui.intVal), buttons, snapRow, saveRow, fxRow, ui.crossTitle, crossBox, ui.bCross, ui.locksTitle, locks,
       row(ui.auto, ui.autoLabel), playRow, row(ui.phraseLabel, ui.phrase), row(ui.channelLabel, ui.channel),
       ui.recTitle, row(ui.inputLabel, ui.input, ui.bInputs), row(ui.check, ui.checkLabel), recRow, ui.status, ui.histTitle, ui.hist);
     for (const sel of [ui.type, ui.phrase, ui.channel]) { sel.style.cssText = fieldStyle; for (const o of sel.options) o.style.cssText = "background:#1b1f3a;color:#fff;"; }
@@ -1187,6 +1243,7 @@
     ui.crossTitle.textContent = T("cross_title"); ui.labelA.textContent = T("parent_a"); ui.labelB.textContent = T("parent_b");
     ui.bCross.textContent = T("btn_cross"); ui.bCross.title = T("tip_cross");
     fillParents();
+    ui.fxBox.checked = !!S.ui.applyFx; ui.fxLabel.textContent = T("apply_fx"); ui.fxLabel.title = T("tip_apply_fx");
     ui.bOpen.textContent = T("btn_open"); ui.bOpen.title = T("tip_open");
     ui.bPlay.textContent = T("btn_play"); ui.bLoop.textContent = S.looping ? T("btn_loop_stop") : T("btn_loop");
     ui.bLoop.style.background = S.looping ? "#8a2cc6" : "#2c4bc6"; ui.bLoop.title = T("tip_loop");
@@ -1221,7 +1278,7 @@
     if (!S.history.length) { ui.hist.textContent = T("hist_empty"); return; }
     for (const h of S.history) {
       const time = new Date(h.id).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
-      const apply = el("button", { textContent: "▶ " + T("kind_" + h.kind) + " · " + T("type_" + h.type) + " · " + time, title: T("hist_apply"), onclick: () => restoreEntry(h, false) });
+      const apply = el("button", { textContent: "▶ " + entryLabel(h), title: T("hist_apply"), onclick: () => restoreEntry(h, false) });
       apply.style.cssText = btnStyle + "flex:1;text-align:left;";
       const star = el("button", { textContent: h.star ? "★" : "☆", title: T("hist_star"), onclick: () => { h.star = !h.star; trimHistory(); save(); renderHistory(); fillParents(); } });
       star.style.cssText = btnStyle;
@@ -1246,7 +1303,7 @@
     syncPanel();
   }
 
-  window.__ctRandom = { takeSnapshot, swapSnapshot, parents, decodePatch, openSyx, analyse, encodeWav, makeZip, toggleLoop, exportPatch, plan: { planRandom, planMutate, planMatrix, applyGuards, PARAMS }, run, undoLast, readAll, applyState, playPhrase, stopPlayback, state: S, start };
+  window.__ctRandom = { readFxMeta, openSyx, takeSnapshot, swapSnapshot, parents, decodePatch, openSyx, analyse, encodeWav, makeZip, toggleLoop, exportPatch, plan: { planRandom, planMutate, planMatrix, applyGuards, PARAMS }, run, undoLast, readAll, applyState, playPhrase, stopPlayback, state: S, start };
 
   if (window.CTRND_DATA) start(window.CTRND_DATA, window.CTRND_DATA.version);
   else {

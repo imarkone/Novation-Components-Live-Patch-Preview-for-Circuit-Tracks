@@ -106,3 +106,12 @@ btn_cross,🧬 Krížiť,🧬 Cross
 tip_cross,"Vytvorí potomka dvoch zvukov označených ★: gombíky medzi A a B, prepínače a matica od jedného z nich. Intenzita pridá náhodu.","Creates a child of two starred sounds: knobs between A and B, switches and the matrix from one of them. Intensity adds randomness."
 status_cross_need,Na kríženie označ ★ aspoň dva zvuky v histórii a vyber rôzne A a B.,"To cross, star at least two sounds in the history and choose different A and B."
 kind_cross,Kríženie,Cross
+type_bell,Bell,Bell
+type_string,String,String
+type_arp,Arp,Arp
+type_movement,Movement,Movement
+kind_open,Otvorené,Opened
+status_opened_many,"Otvorených {n} zvukov, v editore je {name}. Ostatné sú v histórii.","Opened {n} sounds, {name} is in the editor. The others are in the history."
+apply_fx,Pri otvorení nastaviť delay/reverb projektu CT,Set CT project delay/reverb when opening
+tip_apply_fx,"Prevedené MiniNova patche nesú delay a reverb originálu. CT ich má pre celý projekt (MIDI kanál 16): nastaví sa typ, čas a send pre zvolený synth. Ovplyvní aj ostatné stopy s nastaveným sendom.","Converted MiniNova patches carry the original delay and reverb. The CT has them per project (MIDI channel 16): type, time and the send of the chosen synth are set. Other tracks with a send are affected too."
+status_fx_applied,"Delay/reverb projektu nastavené (reverb send {rev}, delay send {dly}).","Project delay/reverb set (reverb send {rev}, delay send {dly})."
