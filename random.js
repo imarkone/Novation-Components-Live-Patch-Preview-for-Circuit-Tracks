@@ -388,6 +388,30 @@
     return next;
   }
 
+  // Cross: a child of two starred sounds (parents A and B). Each child gets its own affinity w (0.2-0.8 = nearer A or B).
+  // Knobs: a value between the parents around w; pitch steps and menus: taken from A or B; the matrix as a whole from A or B.
+  // Intensity adds noise: some knobs (not pitch, levels or the amp envelope) get any value of their range.
+  function planCross(cur, meta, k, locks, A, B) {
+    const next = {}, w = 0.2 + 0.6 * rnd();
+    lastInfo.donors = [{ sections: "A", name: A.label, pack: "" }, { sections: "B", name: B.label, pack: "" }, { sections: "affinity", name: w.toFixed(2), pack: "" }];
+    for (const p of PARAMS) {
+      if (locks[p.group] || p.group === "matrix" || cur[p.key] === undefined) continue;
+      const a = A.values[p.key], b = B.values[p.key];
+      if (a === undefined || b === undefined) continue;
+      if (p.kind === "slider" && !PITCH_KEY.test(p.key)) {
+        const m = meta[p.key];
+        if (!NO_WILD.test(p.key) && rnd() < 0.12 * k) { next[p.key] = Math.round(m.min + rnd() * (m.max - m.min)); continue; }
+        const u = clamp(w + gauss() * 0.2, 0, 1);
+        next[p.key] = Math.round(clamp(a + (b - a) * u, m.min, m.max));
+      } else next[p.key] = rnd() < w ? b : a;
+    }
+    if (!locks.matrix) {
+      const from = rnd() < w ? B.values : A.values;
+      for (const key of Object.keys(from)) if (key.startsWith("mx.") && cur[key] !== undefined) next[key] = from[key];
+    }
+    return next;
+  }
+
   function planMatrix(kind, cur, meta, type, k, locks) {
     const next = {};
     if (locks.matrix) return next;
@@ -452,7 +476,12 @@
       const k = S.ui.intensity / 100, type = S.ui.type, locks = S.ui.locks;
       const seed = (Math.random() * 4294967296) >>> 0;
       rng = mulberry32(seed);
-      const next = { ...(kind === "random" ? planRandom : planMutate)(cur, meta, type, k, locks), ...planMatrix(kind, cur, meta, type, k, locks) };
+      let next;
+      if (kind === "cross") {
+        const [A, B] = parents();
+        if (!A || !B) throw new Error(T("status_cross_need"));
+        next = planCross(cur, meta, k, locks, A, B);
+      } else next = { ...(kind === "random" ? planRandom : planMutate)(cur, meta, type, k, locks), ...planMatrix(kind, cur, meta, type, k, locks) };
       applyGuards(cur, next, locks);
       const diff = Object.keys(next).filter(key => next[key] !== cur[key]).length;
       status(T("status_applying", { n: diff }));
@@ -460,7 +489,7 @@
       const merged = { ...cur, ...next };
       S.octave = merged["voice.octave"] ?? 0;
       rng = Math.random;
-      const donorList = kind === "random" ? lastInfo.donors.slice() : [];
+      const donorList = kind === "random" || kind === "cross" ? lastInfo.donors.slice() : [];
       S.last = { kind, type, intensity: S.ui.intensity, locks: { ...locks }, seed, donors: donorList, values: merged };
       S.history.unshift({ id: Date.now(), kind, type, values: merged, star: false, seed, intensity: S.ui.intensity, donors: donorList });
       trimHistory(); save(); renderHistory();
@@ -492,7 +521,7 @@
       return false;
     }
     if (a.max_db < L.silent_db) {
-      if (kind === "random" && attempt < L.retries) { status(T("status_retry", { max: a.max_db, i: attempt + 1, n: L.retries })); return true; }
+      if ((kind === "random" || kind === "cross") && attempt < L.retries) { status(T("status_retry", { max: a.max_db, i: attempt + 1, n: L.retries })); return true; }
       status(T("status_quiet", { max: a.max_db })); return false;
     }
     const first = a.max_db;
@@ -522,6 +551,41 @@
     }
     status(first === a.max_db ? T("status_level_ok", { max: a.max_db, peak: a.peak_db }) : T("status_level_fixed", { from: first, to: a.max_db, target: L.target_db }));
     return false;
+  }
+
+  // Starred history entries that can be parents; A and B are chosen in the panel (by history id).
+  const starred = () => S.history.filter(h => h.star);
+  const entryLabel = h => `${T("kind_" + h.kind)} · ${T("type_" + h.type)} · ${new Date(h.id).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}`;
+  function parents() {
+    const list = starred();
+    const find = id => list.find(h => h.id === +id);
+    const A = find(S.ui.parentA) || list[0], B = find(S.ui.parentB) || list.find(h => h !== A);
+    if (!A || !B || A === B) return [];
+    return [{ ...A, label: entryLabel(A) }, { ...B, label: entryLabel(B) }];
+  }
+
+  // Snapshot / A-B compare: Snapshot stores the current sound; A/B swaps the editor between the stored and the current sound.
+  async function takeSnapshot() {
+    if (S.busy) { status(T("status_busy")); return; }
+    S.busy = true; setBusy(true);
+    try { S.snapshot = (await readAll()).cur; status(T("status_snap_saved")); }
+    catch (e) { status(T("status_error", { msg: e.message })); }
+    finally { S.busy = false; setBusy(false); render(); }
+  }
+  async function swapSnapshot() {
+    if (S.busy) { status(T("status_busy")); return; }
+    if (!S.snapshot) { status(T("status_snap_none")); return; }
+    S.busy = true; setBusy(true);
+    try {
+      const { cur } = await readAll();
+      await applyState(S.snapshot);
+      S.octave = S.snapshot["voice.octave"] ?? S.octave;
+      S.snapshot = cur;
+      S.abSide = S.abSide === "A" ? "B" : "A";
+      status(T("status_ab", { side: S.abSide }));
+      if (S.ui.autoplay && !S.looping) await playPhrase(S.octave ?? 0).catch(e => status(errorText(e)));
+    } catch (e) { status(T("status_error", { msg: e.message })); }
+    finally { S.busy = false; setBusy(false); render(); }
   }
 
   async function undoLast() {
@@ -663,7 +727,7 @@
       download(base + ".syx", "application/octet-stream", bytes);
       if (S.ui.debug) {
         const editor = await readAll();
-        const report = { tool: "ct-random 0.7.6", name: label, kind: info.kind, type: info.type, intensity: info.intensity, locks: info.locks, seed: info.seed,
+        const report = { tool: "ct-random " + (S.version || ""), name: label, kind: info.kind, type: info.type, intensity: info.intensity, locks: info.locks, seed: info.seed,
           synth: S.ui.channel, donors: info.donors, generated: info.values, editorAtExport: editor.cur, patchBytes: Array.from(bytes) };
         download(base + ".json", "application/json", JSON.stringify(report, null, 1));
       }
@@ -753,6 +817,24 @@
     return devices.filter(d => d.kind === "audioinput");
   }
 
+  const WORKLET_SOURCE = `registerProcessor("ct-recorder", class extends AudioWorkletProcessor {
+  constructor() { super(); this.l = []; this.r = []; this.n = 0; }
+  process(inputs) {
+    const input = inputs[0];
+    if (input && input.length) {
+      const l = input[0], r = input[1] || input[0];
+      this.l.push(new Float32Array(l)); this.r.push(new Float32Array(r)); this.n += l.length;
+      if (this.n >= 4096) {
+        const L = new Float32Array(this.n), R = new Float32Array(this.n);
+        let o = 0; for (let i = 0; i < this.l.length; i++) { L.set(this.l[i], o); R.set(this.r[i], o); o += this.l[i].length; }
+        this.port.postMessage([L, R], [L.buffer, R.buffer]);
+        this.l = []; this.r = []; this.n = 0;
+      }
+    }
+    return true;
+  }
+});`;
+
   async function openInput() {
     if (S.audio) return S.audio;
     const constraints = { echoCancellation: false, noiseSuppression: false, autoGainControl: false, channelCount: 2 };
@@ -760,17 +842,29 @@
     const stream = await navigator.mediaDevices.getUserMedia({ audio: constraints });
     const ctx = new AudioContext({ latencyHint: "interactive" });
     const source = ctx.createMediaStreamSource(stream);
-    const proc = ctx.createScriptProcessor(4096, 2, 2);
     const mute = ctx.createGain(); mute.gain.value = 0;
-    source.connect(proc); proc.connect(mute); mute.connect(ctx.destination);
-    const audio = { ctx, stream, proc, chunks: null, channels: stream.getAudioTracks()[0].getSettings().channelCount || 1 };
-    proc.onaudioprocess = e => {
-      const d = e.inputBuffer.getChannelData(0);
-      let sum = 0; for (let i = 0; i < d.length; i++) sum += d[i] * d[i];
-      audio.level = Math.sqrt(sum / d.length);
-      if (!audio.chunks) return;
-      audio.chunks.push([new Float32Array(e.inputBuffer.getChannelData(0)), new Float32Array(e.inputBuffer.getChannelData(e.inputBuffer.numberOfChannels > 1 ? 1 : 0))]);
+    const audio = { ctx, stream, proc: null, chunks: null, channels: stream.getAudioTracks()[0].getSettings().channelCount || 1 };
+    const take = (left, right) => {
+      let sum = 0; for (let i = 0; i < left.length; i++) sum += left[i] * left[i];
+      audio.level = Math.sqrt(sum / left.length);
+      if (audio.chunks) audio.chunks.push([left, right]);
     };
+    try {
+      // AudioWorklet (ScriptProcessorNode is deprecated). The processor posts blocks of about 4096 frames.
+      const url = URL.createObjectURL(new Blob([WORKLET_SOURCE], { type: "application/javascript" }));
+      await ctx.audioWorklet.addModule(url);
+      URL.revokeObjectURL(url);
+      const node = new AudioWorkletNode(ctx, "ct-recorder", { numberOfInputs: 1, numberOfOutputs: 1, channelCount: 2, channelCountMode: "explicit" });
+      node.port.onmessage = e => take(e.data[0], e.data[1]);
+      source.connect(node); node.connect(mute);
+      audio.proc = node;
+    } catch {
+      const proc = ctx.createScriptProcessor(4096, 2, 2);
+      proc.onaudioprocess = e => take(new Float32Array(e.inputBuffer.getChannelData(0)), new Float32Array(e.inputBuffer.getChannelData(e.inputBuffer.numberOfChannels > 1 ? 1 : 0)));
+      source.connect(proc); proc.connect(mute);
+      audio.proc = proc;
+    }
+    mute.connect(ctx.destination);
     S.audio = audio;
     return audio;
   }
@@ -1015,6 +1109,17 @@
     for (const b of [ui.bRandom, ui.bMutate, ui.bUndo]) { b.style.cssText = btnStyle; ui.buttons.push(b); }
     ui.bStop.style.cssText = btnStyle;
     const buttons = el("div"); buttons.style.cssText = "display:flex;gap:6px;margin:6px 0;"; buttons.append(ui.bRandom, ui.bMutate, ui.bUndo, ui.bStop);
+    ui.bSnap = el("button", { onclick: () => takeSnapshot() }); ui.bAB = el("button", { onclick: () => swapSnapshot() });
+    for (const b of [ui.bSnap, ui.bAB]) { b.style.cssText = btnStyle; ui.buttons.push(b); }
+    const snapRow = el("div"); snapRow.style.cssText = "display:flex;gap:6px;margin:4px 0;"; snapRow.append(ui.bSnap, ui.bAB);
+    ui.crossTitle = el("div"); ui.crossTitle.style.cssText = "margin-top:6px;font-weight:bold;";
+    ui.parentA = el("select", { onchange: () => { S.ui.parentA = +ui.parentA.value; save(); } });
+    ui.parentB = el("select", { onchange: () => { S.ui.parentB = +ui.parentB.value; save(); } });
+    for (const sel of [ui.parentA, ui.parentB]) sel.style.cssText = fieldStyle + "max-width:250px;";
+    ui.bCross = el("button", { onclick: () => run("cross") }); ui.bCross.style.cssText = btnStyle; ui.buttons.push(ui.bCross);
+    ui.labelA = el("span"); ui.labelB = el("span");
+    const crossBox = el("div"); crossBox.style.cssText = "display:grid;grid-template-columns:auto 1fr;gap:3px 6px;align-items:center;margin:4px 0;";
+    crossBox.append(ui.labelA, ui.parentA, ui.labelB, ui.parentB);
     ui.bSave = el("button", { onclick: () => exportPatch() }); ui.bSave.style.cssText = btnStyle; ui.buttons.push(ui.bSave);
     ui.debug = el("input", { type: "checkbox", onchange: () => { S.ui.debug = ui.debug.checked; save(); } }); ui.debugLabel = el("label");
     ui.bOpen = el("button", { onclick: () => openSyx() }); ui.bOpen.style.cssText = btnStyle; ui.buttons.push(ui.bOpen);
@@ -1049,7 +1154,7 @@
     ui.status = el("div"); ui.status.style.cssText = "margin:6px 0;min-height:16px;color:#9fb3ff;overflow-wrap:anywhere;";
     ui.histTitle = el("div"); ui.hist = el("div");
     const row = (label, ...controls) => { const r = el("div"); r.style.cssText = "margin:4px 0;display:flex;gap:6px;align-items:center;flex-wrap:wrap;"; r.append(label, ...controls); return r; };
-    ui.body.append(row(ui.typeLabel, ui.type), row(ui.intLabel, ui.int, ui.intVal), buttons, saveRow, ui.locksTitle, locks,
+    ui.body.append(row(ui.typeLabel, ui.type), row(ui.intLabel, ui.int, ui.intVal), buttons, snapRow, saveRow, ui.crossTitle, crossBox, ui.bCross, ui.locksTitle, locks,
       row(ui.auto, ui.autoLabel), playRow, row(ui.phraseLabel, ui.phrase), row(ui.channelLabel, ui.channel),
       ui.recTitle, row(ui.inputLabel, ui.input, ui.bInputs), row(ui.check, ui.checkLabel), recRow, ui.status, ui.histTitle, ui.hist);
     for (const sel of [ui.type, ui.phrase, ui.channel]) { sel.style.cssText = fieldStyle; for (const o of sel.options) o.style.cssText = "background:#1b1f3a;color:#fff;"; }
@@ -1061,7 +1166,7 @@
 
   function render() {
     if (!ui || !S.data) return;
-    ui.title.textContent = T("panel_title");
+    ui.title.textContent = T("panel_title") + (S.version ? " v" + S.version : "");
     ui.collapse.textContent = S.ui.collapsed ? T("collapse_open") : T("collapse_close");
     ui.langBtn.textContent = T("lang_toggle");
     ui.body.style.display = S.ui.collapsed ? "none" : "block";
@@ -1076,6 +1181,11 @@
     ui.phraseLabel.textContent = T("phrase_label");
     [...ui.phrase.options].forEach(o => { o.textContent = T("phrase_" + o.value); }); ui.phrase.value = S.ui.phrase;
     ui.channelLabel.textContent = T("channel"); ui.channel.value = S.ui.channel;
+    ui.bSnap.textContent = T("btn_snapshot"); ui.bSnap.title = T("tip_snapshot");
+    ui.bAB.textContent = S.snapshot ? T("btn_ab") + (S.abSide ? " (" + S.abSide + ")" : "") : T("btn_ab"); ui.bAB.title = T("tip_ab");
+    ui.crossTitle.textContent = T("cross_title"); ui.labelA.textContent = T("parent_a"); ui.labelB.textContent = T("parent_b");
+    ui.bCross.textContent = T("btn_cross"); ui.bCross.title = T("tip_cross");
+    fillParents();
     ui.bOpen.textContent = T("btn_open"); ui.bOpen.title = T("tip_open");
     ui.bPlay.textContent = T("btn_play"); ui.bLoop.textContent = S.looping ? T("btn_loop_stop") : T("btn_loop");
     ui.bLoop.style.background = S.looping ? "#8a2cc6" : "#2c4bc6"; ui.bLoop.title = T("tip_loop");
@@ -1090,6 +1200,18 @@
     renderHistory();
   }
 
+  function fillParents() {
+    if (!ui) return;
+    const list = starred(), [A, B] = parents();
+    for (const [sel, chosen] of [[ui.parentA, A], [ui.parentB, B]]) {
+      sel.textContent = "";
+      if (!list.length) sel.append(el("option", { value: "", textContent: T("parent_none") }));
+      for (const h of list) sel.append(el("option", { value: h.id, textContent: entryLabel(h) }));
+      for (const o of sel.options) o.style.cssText = "background:#1b1f3a;color:#fff;";
+      if (chosen) sel.value = chosen.id;
+    }
+  }
+
   function renderHistory() {
     if (!ui || !S.data) return;
     ui.histTitle.textContent = T("history", { n: HISTORY_MAX });
@@ -1099,7 +1221,7 @@
       const time = new Date(h.id).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
       const apply = el("button", { textContent: "▶ " + T("kind_" + h.kind) + " · " + T("type_" + h.type) + " · " + time, title: T("hist_apply"), onclick: () => restoreEntry(h, false) });
       apply.style.cssText = btnStyle + "flex:1;text-align:left;";
-      const star = el("button", { textContent: h.star ? "★" : "☆", title: T("hist_star"), onclick: () => { h.star = !h.star; trimHistory(); save(); renderHistory(); } });
+      const star = el("button", { textContent: h.star ? "★" : "☆", title: T("hist_star"), onclick: () => { h.star = !h.star; trimHistory(); save(); renderHistory(); fillParents(); } });
       star.style.cssText = btnStyle;
       const row = el("div"); row.style.cssText = "display:flex;gap:4px;margin:2px 0;"; row.append(apply, star);
       ui.hist.append(row);
@@ -1113,20 +1235,21 @@
   }
 
   // ---------------------------------------------------------------- start
-  function start(files) {
+  function start(files, version) {
     if (S.data) return;
+    S.version = version || "";
     S.data = prepareData(files);
     load();
     setInterval(syncPanel, 800);
     syncPanel();
   }
 
-  window.__ctRandom = { decodePatch, openSyx, analyse, encodeWav, makeZip, toggleLoop, exportPatch, plan: { planRandom, planMutate, planMatrix, applyGuards, PARAMS }, run, undoLast, readAll, applyState, playPhrase, stopPlayback, state: S, start };
+  window.__ctRandom = { takeSnapshot, swapSnapshot, parents, decodePatch, openSyx, analyse, encodeWav, makeZip, toggleLoop, exportPatch, plan: { planRandom, planMutate, planMatrix, applyGuards, PARAMS }, run, undoLast, readAll, applyState, playPhrase, stopPlayback, state: S, start };
 
-  if (window.CTRND_DATA) start(window.CTRND_DATA);
+  if (window.CTRND_DATA) start(window.CTRND_DATA, window.CTRND_DATA.version);
   else {
     window.addEventListener("message", event => {
-      if (event.source === window && event.data && event.data.source === "ctrnd-loader" && event.data.type === "data") start(event.data.files);
+      if (event.source === window && event.data && event.data.source === "ctrnd-loader" && event.data.type === "data") start(event.data.files, event.data.version);
     });
     window.postMessage({ source: "ctrnd-main", type: "need-data" }, window.location.origin);
   }

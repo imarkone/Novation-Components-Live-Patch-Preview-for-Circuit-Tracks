@@ -91,3 +91,18 @@ status_too_loud,"Preťažené ({peak} dB), mixer stíšený.","Overloaded ({peak
 status_level_ok,"Hlasitosť OK: max {max} dB, špička {peak} dB.","Level OK: max {max} dB, peak {peak} dB."
 status_level_fixed,Hlasitosť vyrovnaná: {from} → {to} dB (cieľ {target} dB).,Level adjusted: {from} → {to} dB (target {target} dB).
 status_level_limit,"Hlasitosť {max} dB, mixer už nemá rezervu.","Level {max} dB, the mixer has no headroom left."
+btn_snapshot,📷 Snapshot,📷 Snapshot
+tip_snapshot,Uloží aktuálny zvuk ako porovnávací bod.,Stores the current sound as a reference point.
+btn_ab,A/B,A/B
+tip_ab,Prepína medzi uloženým snapshotom a aktuálnym zvukom. Každé kliknutie vymení strany.,Switches between the stored snapshot and the current sound. Each click swaps sides.
+status_snap_saved,Snapshot uložený. Uprav zvuk a porovnaj cez A/B.,Snapshot stored. Edit the sound and compare with A/B.
+status_snap_none,Najprv ulož Snapshot.,Store a snapshot first.
+status_ab,Počuješ stranu {side}.,You hear side {side}.
+cross_title,Kríženie obľúbených (★),Cross favourites (★)
+parent_a,Rodič A,Parent A
+parent_b,Rodič B,Parent B
+parent_none,— označ ★ v histórii —,— star sounds in the history —
+btn_cross,🧬 Krížiť,🧬 Cross
+tip_cross,"Vytvorí potomka dvoch zvukov označených ★: gombíky medzi A a B, prepínače a matica od jedného z nich. Intenzita pridá náhodu.","Creates a child of two starred sounds: knobs between A and B, switches and the matrix from one of them. Intensity adds randomness."
+status_cross_need,Na kríženie označ ★ aspoň dva zvuky v histórii a vyber rôzne A a B.,"To cross, star at least two sounds in the history and choose different A and B."
+kind_cross,Kríženie,Cross

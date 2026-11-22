@@ -17,7 +17,8 @@
   }
 
   async function send() {
-    window.postMessage({ source: "ctrnd-loader", type: "data", files: await readFiles() }, window.location.origin);
+    // The version shown in the panel comes from the manifest Chrome actually loaded.
+    window.postMessage({ source: "ctrnd-loader", type: "data", files: await readFiles(), version: chrome.runtime.getManifest().version }, window.location.origin);
   }
 
   window.addEventListener("message", event => {

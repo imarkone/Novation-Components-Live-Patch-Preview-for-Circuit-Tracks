@@ -1,6 +1,6 @@
 key,value
 target_db,-21
-tolerance_db,7
+tolerance_db,4
 silent_db,-40
 peak_db,-1
 retries,3
